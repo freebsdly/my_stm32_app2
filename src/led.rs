@@ -24,44 +24,40 @@ pub fn init(led0: PB1<Output<PushPull>>, led1: PB0<Output<PushPull>>) {
 /// 设置指定LED的状态
 /// true 表示点亮，false 表示熄灭
 pub fn set_led(led_id: LedId, state: bool) {
-    cortex_m::interrupt::free(|cs| {
-        match led_id {
-            LedId::Led0 => {
-                if let Some(ref mut led) = LED0.borrow(cs).borrow_mut().as_mut() {
-                    if state {
-                        led.set_low();
-                    } else {
-                        led.set_high();
-                    }
+    cortex_m::interrupt::free(|cs| match led_id {
+        LedId::Led0 => {
+            if let Some(ref mut led) = LED0.borrow(cs).borrow_mut().as_mut() {
+                if state {
+                    led.set_low();
+                } else {
+                    led.set_high();
                 }
-            },
-            LedId::Led1 => {
-                if let Some(ref mut led) = LED1.borrow(cs).borrow_mut().as_mut() {
-                    if state {
-                        led.set_low();
-                    } else {
-                        led.set_high();
-                    }
+            }
+        }
+        LedId::Led1 => {
+            if let Some(ref mut led) = LED1.borrow(cs).borrow_mut().as_mut() {
+                if state {
+                    led.set_low();
+                } else {
+                    led.set_high();
                 }
-            },
+            }
         }
     });
 }
 
 /// 切换指定LED的状态
 pub fn toggle_led(led_id: LedId) {
-    cortex_m::interrupt::free(|cs| {
-        match led_id {
-            LedId::Led0 => {
-                if let Some(ref mut led) = LED0.borrow(cs).borrow_mut().as_mut() {
-                    led.toggle();
-                }
-            },
-            LedId::Led1 => {
-                if let Some(ref mut led) = LED1.borrow(cs).borrow_mut().as_mut() {
-                    led.toggle();
-                }
-            },
+    cortex_m::interrupt::free(|cs| match led_id {
+        LedId::Led0 => {
+            if let Some(ref mut led) = LED0.borrow(cs).borrow_mut().as_mut() {
+                led.toggle();
+            }
+        }
+        LedId::Led1 => {
+            if let Some(ref mut led) = LED1.borrow(cs).borrow_mut().as_mut() {
+                led.toggle();
+            }
         }
     });
 }
@@ -78,7 +74,7 @@ pub fn set_all_leds(states: &[bool]) {
                 }
             }
         }
-        
+
         if states.len() > 1 {
             if let Some(ref mut led) = LED1.borrow(cs).borrow_mut().as_mut() {
                 if states[1] {
