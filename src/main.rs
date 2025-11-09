@@ -9,7 +9,6 @@ use cortex_m_rt::entry;
 use defmt::info;
 use defmt_rtt as _;
 use panic_probe as _;
-use stm32f4xx_hal::timer::Timer;
 use stm32f4xx_hal::{pac, prelude::*};
 
 #[allow(clippy::empty_loop)]
@@ -17,7 +16,7 @@ use stm32f4xx_hal::{pac, prelude::*};
 fn main() -> ! {
     // 1. 获取芯片外设实例
     let dp = pac::Peripherals::take().unwrap();
-    let cp = cortex_m::Peripherals::take().unwrap();
+    let _cp = cortex_m::Peripherals::take().unwrap();
 
     // 2. 配置系统时钟（关键：延时精度依赖时钟频率）
     let mut rcc = dp.RCC.constrain();
@@ -34,12 +33,15 @@ fn main() -> ! {
     led::init(led0, led1);
 
     loop {
-        led::set_led0(true);   // 点亮LED0
-        led::set_led1(false);  // 熄灭LED1
+        // 点亮LED0，熄灭LED1
+        led::set_led(led::LedId::Led0, true);
+        led::set_led(led::LedId::Led1, false);
         delay.delay(500.millis());
         info!("LED switch");
-        led::set_led0(false);  // 熄灭LED0
-        led::set_led1(true);   // 点亮LED1
+        
+        // 熄灭LED0，点亮LED1
+        led::set_led(led::LedId::Led0, false);
+        led::set_led(led::LedId::Led1, true);
         delay.delay(500.millis());
     }
 }
