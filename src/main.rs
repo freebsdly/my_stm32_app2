@@ -10,7 +10,12 @@ use cortex_m_rt::entry;
 use defmt::info;
 use defmt_rtt as _;
 use panic_probe as _;
-use stm32f4xx_hal::{pac, prelude::*};
+use stm32f4xx_hal::gpio::GpioExt;
+use stm32f4xx_hal::hal::delay::DelayNs;
+use stm32f4xx_hal::pac;
+use stm32f4xx_hal::rcc::{Config, RccExt};
+use stm32f4xx_hal::time::{Hertz};
+use stm32f4xx_hal::timer::TimerExt;
 
 #[allow(clippy::empty_loop)]
 #[entry]
@@ -19,8 +24,11 @@ fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
     let _cp = cortex_m::Peripherals::take().unwrap();
 
+    let clock_cfg = Config::default()
+        .sysclk(Hertz::MHz(48u32));
+
     // 2. 配置系统时钟（关键：延时精度依赖时钟频率）
-    let mut rcc = dp.RCC.constrain();
+    let mut rcc = dp.RCC.constrain().freeze(clock_cfg);
 
     // 3. 初始化 SysTick 延时（传入系统时钟频率）
     let mut delay = dp.TIM2.delay_ms(&mut rcc);
@@ -61,6 +69,6 @@ fn main() -> ! {
             key::wait_release(key::KeyId::KeyUp);
         }
 
-        delay.delay(10.millis());
+        delay.delay_ms(10)
     }
 }

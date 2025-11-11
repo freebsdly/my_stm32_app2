@@ -6,11 +6,9 @@
 //! - KEY2: PC13 (低电平有效)
 //! - KEY_UP(WK_UP): PA0 (高电平有效)
 
-use stm32f4xx_hal::{
-    gpio::{Input, Pull, PH3, PH2, PC13, PA0},
-};
 use core::cell::RefCell;
 use cortex_m::interrupt::Mutex;
+use stm32f4xx_hal::gpio::{Input, PA0, PC13, PH2, PH3};
 
 /// 按键ID枚举
 #[derive(Debug, Clone, Copy)]
@@ -24,9 +22,6 @@ pub enum KeyId {
     /// KEY_UP 按键连接到 PA0 (高电平有效)
     KeyUp,
 }
-
-/// WK_UP按键的别名
-pub use KeyId::KeyUp as WK_UP;
 
 // 定义静态变量存储按键实例
 static KEY0: Mutex<RefCell<Option<PH3<Input>>>> = Mutex::new(RefCell::new(None));

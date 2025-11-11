@@ -47,6 +47,7 @@ pub fn set_led(led_id: LedId, state: bool) {
 }
 
 /// 切换指定LED的状态
+#[allow(unused)]
 pub fn toggle_led(led_id: LedId) {
     cortex_m::interrupt::free(|cs| match led_id {
         LedId::Led0 => {
