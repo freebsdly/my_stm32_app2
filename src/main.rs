@@ -1,4 +1,3 @@
-#![deny(unsafe_code)]
 #![no_main]
 #![no_std]
 
@@ -134,28 +133,28 @@ fn main() -> ! {
         alt_fmc::D14::from(gpio_d.pd9.internal_pull_up(true)),
         alt_fmc::D15::from(gpio_d.pd10.internal_pull_up(true)),
         // FMC和LTDC共享的引脚，统一配置为AF14(LTDC)
-        alt_fmc::D16::from(gpio_h.ph8.into_alternate::<14>()),
-        alt_fmc::D17::from(gpio_h.ph9.into_alternate::<14>()),
-        alt_fmc::D18::from(gpio_h.ph10.into_alternate::<14>()),
-        alt_fmc::D19::from(gpio_h.ph11.into_alternate::<14>()),
-        alt_fmc::D20::from(gpio_h.ph12.into_alternate::<14>()),
-        alt_fmc::D21::from(gpio_h.ph13.into_alternate::<14>()),
-        alt_fmc::D22::from(gpio_h.ph14.into_alternate::<14>()),
-        alt_fmc::D23::from(gpio_h.ph15.into_alternate::<14>()),
-        alt_fmc::D24::from(gpio_i.pi0.into_alternate::<14>()),
-        alt_fmc::D25::from(gpio_i.pi1.into_alternate::<14>()),
-        alt_fmc::D26::from(gpio_i.pi2.into_alternate::<14>()),
+        alt_fmc::D16::from(gpio_h.ph8.into_alternate()),
+        alt_fmc::D17::from(gpio_h.ph9.into_alternate()),
+        alt_fmc::D18::from(gpio_h.ph10.into_alternate()),
+        alt_fmc::D19::from(gpio_h.ph11.into_alternate()),
+        alt_fmc::D20::from(gpio_h.ph12.into_alternate()),
+        alt_fmc::D21::from(gpio_h.ph13.into_alternate()),
+        alt_fmc::D22::from(gpio_h.ph14.into_alternate()),
+        alt_fmc::D23::from(gpio_h.ph15.into_alternate()),
+        alt_fmc::D24::from(gpio_i.pi0.into_alternate()),
+        alt_fmc::D25::from(gpio_i.pi1.into_alternate()),
+        alt_fmc::D26::from(gpio_i.pi2.into_alternate()),
         // PI3 不用于FMC或LTDC，保留为普通GPIO
         alt_fmc::D27::from(gpio_i.pi3.internal_pull_up(true)),
-        alt_fmc::D28::from(gpio_i.pi6.internal_pull_up(true)),
-        alt_fmc::D29::from(gpio_i.pi7.internal_pull_up(true)),
-        alt_fmc::D30::from(gpio_i.pi9.into_alternate::<14>()),
-        alt_fmc::D31::from(gpio_i.pi10.into_alternate::<14>()),
+        alt_fmc::D28::from(gpio_i.pi6.into_alternate()),
+        alt_fmc::D29::from(gpio_i.pi7.into_alternate()),
+        alt_fmc::D30::from(gpio_i.pi9.into_alternate()),
+        alt_fmc::D31::from(gpio_i.pi10.into_alternate()),
         alt_fmc::Nbl0::from(gpio_e.pe0.internal_pull_up(true)),
         alt_fmc::Nbl1::from(gpio_e.pe1.internal_pull_up(true)),
         // NBL2和NBL3引脚也同时用于LTDC，统一配置为AF14(LTDC)
-        alt_fmc::Nbl2::from(gpio_i.pi4.into_alternate::<14>()),
-        alt_fmc::Nbl3::from(gpio_i.pi5.into_alternate::<14>()),
+        alt_fmc::Nbl2::from(gpio_i.pi4.into_alternate()),
+        alt_fmc::Nbl3::from(gpio_i.pi5.into_alternate()),
         alt_fmc::Sdcke0::from(gpio_h.ph2.internal_pull_up(true)),
         alt_fmc::Sdclk::from(gpio_g.pg8.internal_pull_up(true)),
         alt_fmc::Sdncas::from(gpio_g.pg15.internal_pull_up(true)),
@@ -174,6 +173,7 @@ fn main() -> ! {
     // 计算帧缓冲区大小 (800 * 480 * 2 字节)
     let frame_buffer_len = 800 * 480;
     // 安全地从原始指针创建切片
+    // 注意：这是访问外部SDRAM内存的必要操作，在嵌入式系统中是常见做法
     let frame_buffer =
         unsafe { core::slice::from_raw_parts_mut(frame_buffer_ptr, frame_buffer_len) };
 
@@ -181,39 +181,45 @@ fn main() -> ! {
     let pins = LtdcPins::new(
         // Red pins - 根据正点原子阿波罗板子的引脚分配
         RedPins::new(
-            gpio_h.ph8.into_alternate::<14>(),  // R2 - PH8 (DCMI_HREF)
-            gpio_h.ph9.into_alternate::<14>(),  // R3 - PH9 (LCD_R3)
-            gpio_h.ph10.into_alternate::<14>(), // R4 - PH10 (LCD_R4)
-            gpio_h.ph11.into_alternate::<14>(), // R5 - PH11 (LCD_R5)
-            gpio_h.ph12.into_alternate::<14>(), // R6 - PH12 (LCD_R6)
-            gpio_g.pg6.into_alternate::<14>(),  // R7 - PG6 (LCD_R7)
+            gpio_h.ph2.into_alternate(),  // R0 - PH2 (KEY1)
+            gpio_h.ph3.into_alternate(),  // R1 - PH3 (KEY0)
+            gpio_h.ph8.into_alternate(),  // R2 - PH8 (DCMI_HREF)
+            gpio_h.ph9.into_alternate(),  // R3 - PH9 (LCD_R3)
+            gpio_h.ph10.into_alternate(), // R4 - PH10 (LCD_R4)
+            gpio_h.ph11.into_alternate(), // R5 - PH11 (LCD_R5)
+            gpio_h.ph12.into_alternate(), // R6 - PH12 (LCD_R6)
+            gpio_g.pg6.into_alternate(),  // R7 - PG6 (LCD_R7)
         ),
         // Green pins
         GreenPins::new(
-            gpio_h.ph13.into_alternate::<14>(), // G2 - PH13 (LCD_G2)
-            gpio_h.ph14.into_alternate::<14>(), // G3 - PH14 (LCD_G3)
-            gpio_h.ph15.into_alternate::<14>(), // G4 - PH15 (LCD_G4)
-            gpio_i.pi0.into_alternate::<14>(),  // G5 - PI0 (LCD_G5)
-            gpio_i.pi1.into_alternate::<14>(),  // G6 - PI1 (LCD_G6)
-            gpio_i.pi2.into_alternate::<14>(),  // G7 - PI2 (LCD_G7)
+            gpio_e.pe5.into_alternate(),  // G0 - PE5 (SAI1_SCKA)
+            gpio_e.pe6.into_alternate(),  // G1 - PE6 (SAI1_SDA)
+            gpio_h.ph13.into_alternate(), // G2 - PH13 (LCD_G2)
+            gpio_h.ph14.into_alternate(), // G3 - PH14 (LCD_G3)
+            gpio_h.ph15.into_alternate(), // G4 - PH15 (LCD_G4)
+            gpio_i.pi0.into_alternate(),  // G5 - PI0 (LCD_G5)
+            gpio_i.pi1.into_alternate(),  // G6 - PI1 (LCD_G6)
+            gpio_i.pi2.into_alternate(),  // G7 - PI2 (LCD_G7)
         ),
         // Blue pins
         BluePins::new(
-            gpio_g.pg10.into_alternate::<14>(), // B2 - PG10 (NRF_CS)
-            gpio_g.pg11.into_alternate::<14>(), // B3 - PG11 (LCD_B3)
-            gpio_i.pi4.into_alternate::<14>(),  // B4 - PI4 (LCD_B4)
-            gpio_i.pi5.into_alternate::<14>(),  // B5 - PI5 (LCD_B5)
-            gpio_i.pi6.into_alternate::<14>(),  // B6 - PI6 (LCD_B6)
-            gpio_i.pi7.into_alternate::<14>(),  // B7 - PI7 (LCD_B7)
+            gpio_e.pe4.into_alternate(),  // B0 - PE4 (SAI1_FSA)
+            gpio_g.pg12.into_alternate(), // B1 - PG12 (NRF_CE)
+            gpio_g.pg10.into_alternate(), // B2 - PG10 (NRF_CS)
+            gpio_g.pg11.into_alternate(), // B3 - PG11 (LCD_B3)
+            gpio_i.pi4.into_alternate(),  // B4 - PI4 (LCD_B4)
+            gpio_i.pi5.into_alternate(),  // B5 - PI5 (LCD_B5)
+            gpio_i.pi6.into_alternate(),  // B6 - PI6 (LCD_B6)
+            gpio_i.pi7.into_alternate(),  // B7 - PI7 (LCD_B7)
         ),
         // Control pins
-        gpio_i.pi10.into_alternate::<14>(), // HSYNC - PI10 (LCD_HSYNC)
-        gpio_i.pi9.into_alternate::<14>(),  // VSYNC - PI9 (LCD_VSYNC)
-        gpio_f.pf10.into_alternate::<14>(), // DE (Data Enable) - PF10 (LCD_DE)
-        gpio_g.pg7.into_alternate::<14>(),  // CLK - PG7 (LCD_CLK)
+        gpio_i.pi10.into_alternate(), // HSYNC - PI10 (LCD_HSYNC)
+        gpio_i.pi9.into_alternate(),  // VSYNC - PI9 (LCD_VSYNC)
+        gpio_f.pf10.into_alternate(), // DE (Data Enable) - PF10 (LCD_DE)
+        gpio_g.pg7.into_alternate(),  // CLK - PG7 (LCD_CLK)
     );
 
-    // Create and initialize the LCD display
+    // Create and initialize the LCD
     let mut display = lcd::LcdDisplay::new(dp.LTDC, dp.DMA2D, pins);
     display
         .controller
