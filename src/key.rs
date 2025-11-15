@@ -31,30 +31,12 @@ static KEY_UP: Mutex<RefCell<Option<PA0<Input>>>> = Mutex::new(RefCell::new(None
 
 /// 初始化所有按键
 ///
-/// # 参数
-/// * `gpio_h` - GPIOH端口分频器
-/// * `gpio_c` - GPIOC端口分频器
-/// * `gpio_a` - GPIOA端口分频器
-pub fn init(
-    gpio_h: stm32f4xx_hal::gpio::gpioh::Parts,
-    gpio_c: stm32f4xx_hal::gpio::gpioc::Parts,
-    gpio_a: stm32f4xx_hal::gpio::gpioa::Parts,
-) {
+#[allow(unused)]
+pub fn init(key0: PH3<Input>, key1: PH2<Input>, key2: PC13<Input>, key_up: PA0<Input>) {
     cortex_m::interrupt::free(|cs| {
-        // 初始化 KEY0 (PH3) - 使用上拉电阻，按键按下时为低电平
-        let key0 = gpio_h.ph3.into_pull_up_input();
         KEY0.borrow(cs).replace(Some(key0));
-        
-        // 初始化 KEY1 (PH2) - 使用上拉电阻，按键按下时为低电平
-        let key1 = gpio_h.ph2.into_pull_up_input();
         KEY1.borrow(cs).replace(Some(key1));
-        
-        // 初始化 KEY2 (PC13) - 使用上拉电阻，按键按下时为低电平
-        let key2 = gpio_c.pc13.into_pull_up_input();
         KEY2.borrow(cs).replace(Some(key2));
-        
-        // 初始化 KEY_UP/WK_UP (PA0) - 使用下拉电阻，按键按下时为高电平
-        let key_up = gpio_a.pa0.into_pull_down_input();
         KEY_UP.borrow(cs).replace(Some(key_up));
     });
 }
