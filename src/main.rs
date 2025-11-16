@@ -8,13 +8,16 @@ mod sdram;
 
 // Print panic message to probe console
 use cortex_m_rt::entry;
-use defmt::info;
+use defmt::{error, info, warn};
 use defmt_rtt as _;
 use panic_probe as _;
 
 use crate::sdram::SdramDriver;
+use stm32f4xx_hal::pac::FMC;
+use stm32f4xx_hal::rcc::Enable;
 use stm32f4xx_hal::{
     gpio::alt::fmc as alt_fmc,
+    gpio::alt::ltdc as alt_ltdc,
     gpio::GpioExt,
     hal::delay::DelayNs,
     pac,
@@ -33,8 +36,8 @@ fn main() -> ! {
     let clock_cfg = Config::hse(25.MHz())
         .sysclk(180.MHz())
         .hclk(180.MHz()) // AHB总线时钟 = SYSCLK/1
-        .pclk1(48.MHz()) // APB1低速外设时钟 = HCLK/4
-        .pclk2(96.MHz()); // APB2高速外设时钟 = HCLK/2
+        .pclk1(45.MHz()) // APB1低速外设时钟 = HCLK/4
+        .pclk2(90.MHz()); // APB2高速外设时钟 = HCLK/2
 
     // 2. 配置系统时钟（关键：延时精度依赖时钟频率）
     let mut rcc = dp.RCC.constrain().freeze(clock_cfg);
@@ -42,7 +45,8 @@ fn main() -> ! {
 
     info!("system initialized");
 
-    // 配置GPIO端口
+    // 配置GPIO端口,使能时钟
+    let gpio_a = dp.GPIOA.split(&mut rcc);
     let gpio_b = dp.GPIOB.split(&mut rcc);
     let gpio_c = dp.GPIOC.split(&mut rcc);
     let gpio_d = dp.GPIOD.split(&mut rcc);
@@ -50,58 +54,74 @@ fn main() -> ! {
     let gpio_f = dp.GPIOF.split(&mut rcc);
     let gpio_g = dp.GPIOG.split(&mut rcc);
     let gpio_h = dp.GPIOH.split(&mut rcc);
+    let gpio_i = dp.GPIOI.split(&mut rcc);
 
     // 配置LED引脚为推挽输出模式并初始化LED模块
     let led0 = gpio_b.pb1.into_push_pull_output();
     let led1 = gpio_b.pb0.into_push_pull_output();
     led::init(led0, led1);
 
+    // // 初始化 KEY0 (PH3) - 使用上拉电阻，按键按下时为低电平
+    // let key0 = gpio_h.ph3.into_pull_up_input();
+    // // 初始化 KEY1 (PH2) - 使用上拉电阻，按键按下时为低电平
+    // let key1 = gpio_h.ph2.into_pull_up_input();
+    //
+    // // 初始化 KEY2 (PC13) - 使用上拉电阻，按键按下时为低电平
+    // let key2 = gpio_c.pc13.into_pull_up_input();
+    //
+    // // 初始化 KEY_UP/WK_UP (PA0) - 使用下拉电阻，按键按下时为高电平
+    // let key_up = gpio_a.pa0.into_pull_down_input();
+    //
+    // // 初始化按键
+    // key::init(key0, key1, key2, key_up);
+
+    FMC::enable(&mut rcc);
+
     // 2. 配置GPIO引脚为FMC功能 (AF12)
-    // 初始化SDRAM和配置FMC引脚
-    let _fmc_pins = (
-        // Address pins
-        alt_fmc::A0::from(gpio_f.pf0.into_alternate::<12>()),
-        alt_fmc::A1::from(gpio_f.pf1.into_alternate::<12>()),
-        alt_fmc::A2::from(gpio_f.pf2.into_alternate::<12>()),
-        alt_fmc::A3::from(gpio_f.pf3.into_alternate::<12>()),
-        alt_fmc::A4::from(gpio_f.pf4.into_alternate::<12>()),
-        alt_fmc::A5::from(gpio_f.pf5.into_alternate::<12>()),
-        alt_fmc::A6::from(gpio_f.pf12.into_alternate::<12>()),
-        alt_fmc::A7::from(gpio_f.pf13.into_alternate::<12>()),
-        alt_fmc::A8::from(gpio_f.pf14.into_alternate::<12>()),
-        alt_fmc::A9::from(gpio_f.pf15.into_alternate::<12>()),
-        alt_fmc::A10::from(gpio_g.pg0.into_alternate::<12>()),
-        alt_fmc::A11::from(gpio_g.pg1.into_alternate::<12>()),
-        alt_fmc::A12::from(gpio_g.pg2.into_alternate::<12>()),
+    // Address pins
+    let _ = (
+        alt_fmc::A0::from(gpio_f.pf0),
+        alt_fmc::A1::from(gpio_f.pf1),
+        alt_fmc::A2::from(gpio_f.pf2),
+        alt_fmc::A3::from(gpio_f.pf3),
+        alt_fmc::A4::from(gpio_f.pf4),
+        alt_fmc::A5::from(gpio_f.pf5),
+        alt_fmc::A6::from(gpio_f.pf12),
+        alt_fmc::A7::from(gpio_f.pf13),
+        alt_fmc::A8::from(gpio_f.pf14),
+        alt_fmc::A9::from(gpio_f.pf15),
+        alt_fmc::A10::from(gpio_g.pg0),
+        alt_fmc::A11::from(gpio_g.pg1),
+        alt_fmc::A12::from(gpio_g.pg2),
         // Bank address pins
-        alt_fmc::Ba0::from(gpio_g.pg4.into_alternate::<12>()),
-        alt_fmc::Ba1::from(gpio_g.pg5.into_alternate::<12>()),
+        alt_fmc::Ba0::from(gpio_g.pg4),
+        alt_fmc::Ba1::from(gpio_g.pg5),
         // Data pins
-        alt_fmc::D0::from(gpio_d.pd14.into_alternate::<12>()),
-        alt_fmc::D1::from(gpio_d.pd15.into_alternate::<12>()),
-        alt_fmc::D2::from(gpio_d.pd0.into_alternate::<12>()),
-        alt_fmc::D3::from(gpio_d.pd1.into_alternate::<12>()),
-        alt_fmc::D4::from(gpio_e.pe7.into_alternate::<12>()),
-        alt_fmc::D5::from(gpio_e.pe8.into_alternate::<12>()),
-        alt_fmc::D6::from(gpio_e.pe9.into_alternate::<12>()),
-        alt_fmc::D7::from(gpio_e.pe10.into_alternate::<12>()),
-        alt_fmc::D8::from(gpio_e.pe11.into_alternate::<12>()),
-        alt_fmc::D9::from(gpio_e.pe12.into_alternate::<12>()),
-        alt_fmc::D10::from(gpio_e.pe13.into_alternate::<12>()),
-        alt_fmc::D11::from(gpio_e.pe14.into_alternate::<12>()),
-        alt_fmc::D12::from(gpio_e.pe15.into_alternate::<12>()),
-        alt_fmc::D13::from(gpio_d.pd8.into_alternate::<12>()),
-        alt_fmc::D14::from(gpio_d.pd9.into_alternate::<12>()),
-        alt_fmc::D15::from(gpio_d.pd10.into_alternate::<12>()),
+        alt_fmc::D0::from(gpio_d.pd14),
+        alt_fmc::D1::from(gpio_d.pd15),
+        alt_fmc::D2::from(gpio_d.pd0),
+        alt_fmc::D3::from(gpio_d.pd1),
+        alt_fmc::D4::from(gpio_e.pe7),
+        alt_fmc::D5::from(gpio_e.pe8),
+        alt_fmc::D6::from(gpio_e.pe9),
+        alt_fmc::D7::from(gpio_e.pe10),
+        alt_fmc::D8::from(gpio_e.pe11),
+        alt_fmc::D9::from(gpio_e.pe12),
+        alt_fmc::D10::from(gpio_e.pe13),
+        alt_fmc::D11::from(gpio_e.pe14),
+        alt_fmc::D12::from(gpio_e.pe15),
+        alt_fmc::D13::from(gpio_d.pd8),
+        alt_fmc::D14::from(gpio_d.pd9),
+        alt_fmc::D15::from(gpio_d.pd10),
         // Control pins
-        alt_fmc::Nbl0::from(gpio_e.pe0.into_alternate::<12>()),
-        alt_fmc::Nbl1::from(gpio_e.pe1.into_alternate::<12>()),
-        alt_fmc::Sdcke0::from(gpio_h.ph2.into_alternate::<12>()),
-        alt_fmc::Sdclk::from(gpio_g.pg8.into_alternate::<12>()),
-        alt_fmc::Sdncas::from(gpio_g.pg15.into_alternate::<12>()),
-        alt_fmc::Sdne0::from(gpio_h.ph3.into_alternate::<12>()),
-        alt_fmc::Sdnras::from(gpio_f.pf11.into_alternate::<12>()),
-        alt_fmc::Sdnwe::from(gpio_c.pc0.into_alternate::<12>()),
+        alt_fmc::Nbl0::from(gpio_e.pe0),
+        alt_fmc::Nbl1::from(gpio_e.pe1),
+        alt_fmc::Sdcke0::from(gpio_c.pc3),
+        alt_fmc::Sdclk::from(gpio_g.pg8),
+        alt_fmc::Sdncas::from(gpio_g.pg15),
+        alt_fmc::Sdne0::from(gpio_c.pc2),
+        alt_fmc::Sdnras::from(gpio_f.pf11),
+        alt_fmc::Sdnwe::from(gpio_c.pc0),
     );
 
     // 创建SDRAM驱动实例
@@ -124,8 +144,41 @@ fn main() -> ! {
     // 增加延时确保SDRAM完全稳定
     delay.delay_ms(100); // 增加延时从10ms到100ms确保SDRAM完全稳定
 
+    // Setup LTDC pins for RGB LCD - using correct pins for Apollo STM32F429 board
+    let _ = (
+        alt_ltdc::R2::from(gpio_h.ph8),
+        alt_ltdc::R3::from(gpio_h.ph9),
+        alt_ltdc::R4::from(gpio_h.ph10),
+        alt_ltdc::R5::from(gpio_h.ph11),
+        alt_ltdc::R6::from(gpio_h.ph12),
+        alt_ltdc::R7::from(gpio_g.pg6),
+        alt_ltdc::G0::from(gpio_e.pe5),
+        alt_ltdc::G1::from(gpio_e.pe6),
+        alt_ltdc::G2::from(gpio_h.ph13),
+        alt_ltdc::G3::from(gpio_h.ph14),
+        alt_ltdc::G4::from(gpio_h.ph15),
+        alt_ltdc::G5::from(gpio_i.pi0),
+        alt_ltdc::G6::from(gpio_i.pi1),
+        alt_ltdc::G7::from(gpio_i.pi2),
+        alt_ltdc::B0::from(gpio_e.pe4),
+        alt_ltdc::B1::from(gpio_g.pg12),
+        alt_ltdc::B2::from(gpio_g.pg10),
+        alt_ltdc::B3::from(gpio_g.pg11),
+        alt_ltdc::B4::from(gpio_i.pi4),
+        alt_ltdc::B5::from(gpio_i.pi5),
+        alt_ltdc::B6::from(gpio_i.pi6),
+        alt_ltdc::B7::from(gpio_i.pi7),
+        alt_ltdc::Vsync::from(gpio_i.pi9),
+        alt_ltdc::Hsync::from(gpio_i.pi10),
+        alt_ltdc::De::from(gpio_f.pf10),
+        alt_ltdc::Clk::from(gpio_g.pg7),
+    );
+
+    test_bank_access(&mut sdram_driver);
+
     // 运行综合测试
-    test_sdram_full(&mut sdram_driver);
+    // 实际能用的内存大小为16MB，bank0和bank1
+    run_check_board_test(17 * 1024 * 1024usize);
 
     loop {
         // 检查按键状态并控制LED
@@ -183,7 +236,7 @@ pub fn test_sdram_full(driver: &SdramDriver) -> bool {
 
     // 4. 边界检查（检测缓冲区溢出）
     if read_data[0] != 0xAA || read_data[test_size - 1] != 0x55 {
-        defmt::error!("边界数据错误");
+        error!("边界数据错误");
         return false;
     }
 
@@ -204,7 +257,7 @@ pub fn test_sdram_full(driver: &SdramDriver) -> bool {
         ]);
 
         if w != r {
-            defmt::error!("不一致在偏移:0x{:x} 预期:{:08x} 读取:{:08x}", i, w, r);
+            error!("不一致在偏移:0x{:x} 预期:{:08x} 读取:{:08x}", i, w, r);
             return false;
         }
     }
@@ -219,11 +272,103 @@ pub fn test_sdram_full(driver: &SdramDriver) -> bool {
         driver.read_buffer(&mut buf, test_addr, 512);
 
         if buf.iter().any(|b| *b != *pattern) {
-            defmt::error!("全{:02x}图案测试失败", pattern);
+            error!("全{:02x}图案测试失败", pattern);
             return false;
         }
     }
 
-    defmt::info!("SDRAM通过所有测试");
+    info!("SDRAM通过所有测试");
     true
+}
+
+fn run_check_board_test(size: usize) {
+    // 添加基地址检查
+    info!("SDRAM 基地址: 0x{:08X}", sdram::SDRAM_BASE_ADDR);
+
+    let buffer = unsafe {
+        core::slice::from_raw_parts_mut(
+            sdram::SDRAM_BASE_ADDR as *mut u32,
+            size / 4, // u32占用4字节
+        )
+    };
+
+    // 阶段1：写入棋盘格模式
+    for (i, cell) in buffer.iter_mut().enumerate() {
+        let pattern = if i % 2 == 0 {
+            0xAAAAAAAA // 10101010...
+        } else {
+            0x55555555 // 01010101...
+        };
+        *cell = pattern;
+    }
+
+    // 阶段2：验证读取
+    let mut error_count = 0;
+    let mut last_error_addr = 0;
+
+    for (addr, cell) in buffer.iter().enumerate() {
+        let actual = *cell;
+        let expected = if addr % 2 == 0 {
+            0xAAAAAAAA
+        } else {
+            0x55555555
+        };
+
+        if actual != expected {
+            error_count += 1;
+            last_error_addr = sdram::SDRAM_BASE_ADDR as usize + addr * 4;
+            // 立即打印第一个错误（串口输出）
+            error!(
+                "错误 @ 0x{:08X}: 预期={:08X} 实际={:08X}",
+                last_error_addr, expected, actual
+            );
+            // 只显示前几个错误以避免日志过多
+            if error_count > 10 {
+                break;
+            }
+        }
+
+        // 进度指示
+        if addr % 1_000_000 == 0 {
+            info!("进度: {:01}%", addr as f32 / buffer.len() as f32 * 100.0);
+        }
+    }
+
+    // 测试结果汇总
+    info!("======== 测试结果 ========");
+    info!("测试容量:   {} MB", size / (1024 * 1024));
+    info!("测试单元数: {}", buffer.len());
+    info!("错误数量:   {}", error_count);
+
+    if error_count == 0 {
+        info!("✅ SDRAM 验证通过!");
+    } else {
+        warn!("❌ 发现错误!");
+        warn!("最后错误地址: 0x{:08X}", last_error_addr);
+    }
+}
+
+fn test_bank_access(sdram: &SdramDriver) {
+    // 每个 bank 8MB（32MB / 4）
+    let offsets = [
+        0 * 8 * 1024 * 1024, // Bank 0
+        1 * 8 * 1024 * 1024, // Bank 1
+        2 * 8 * 1024 * 1024, // Bank 2
+        3 * 8 * 1024 * 1024, // Bank 3
+    ];
+
+    for (i, &off) in offsets.iter().enumerate() {
+        unsafe {
+            let ptr = (sdram::SDRAM_BASE_ADDR + off) as *mut u32;
+            ptr.write_volatile(0x1234_5678 + i as u32);
+            cortex_m::asm::delay(1000);
+            let val = ptr.read_volatile();
+            info!(
+                "Bank {}: wrote 0x{:08X}, read 0x{:08X}",
+                i,
+                0x1234_5678 + i as u32,
+                val
+            );
+        }
+    }
 }

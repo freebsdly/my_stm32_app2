@@ -4,8 +4,7 @@ MEMORY
   FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 1024K
   CCMRAM (rwx) : ORIGIN = 0x10000000, LENGTH = 64K
   RAM (rwx) : ORIGIN = 0x20000000, LENGTH = 192K
-  /* ... other memory regions ... */
-  RAM_EXT : ORIGIN = 0xC0000000, LENGTH = 32M
+  SDRAM (rwx) : ORIGIN = 0xC0000000, LENGTH = 32M
 }
 
 /* This is where the call stack will be allocated. */

@@ -1,8 +1,10 @@
 use defmt::info;
+use stm32f4xx_hal::pac::{FMC, GPIOC, GPIOD, GPIOE, GPIOF, GPIOG};
+use stm32f4xx_hal::rcc::Enable;
 use stm32f4xx_hal::{pac, rcc::Rcc};
 
-const SDRAM_BASE_ADDR: u32 = 0xC000_0000;
-const SDRAM_SIZE: u32 = 32 * 1024 * 1024;
+pub(crate) const SDRAM_BASE_ADDR: u32 = 0xC000_0000;
+pub(crate) const SDRAM_SIZE: u32 = 32 * 1024 * 1024;
 
 pub struct SdramDriver {
     fmc: pac::FMC,
@@ -170,47 +172,72 @@ impl SdramDriver {
 
     /// 初始化SDRAM
     pub fn init(&mut self, rcc: &mut Rcc) -> Result<(), &'static str> {
-        // 1. 使能时钟（修复：同时使能GPIO和FMC时钟）
-        rcc.ahb3enr().modify(|_, w| w.fmcen().set_bit());
-        rcc.ahb1enr().modify(|_, w| {
-            w.gpiocen()
-                .set_bit()
-                .gpioden()
-                .set_bit()
-                .gpioeen()
-                .set_bit()
-                .gpiofen()
-                .set_bit()
-                .gpiogen()
-                .set_bit()
-        });
-        cortex_m::asm::delay(100);
-        info!("FMC时钟已使能");
+        if FMC::is_enabled() {
+            info!("====> FMC时钟已使能")
+        } else {
+            info!("====> 使能FMC时钟");
+            FMC::enable(rcc);
+            // rcc.ahb3enr().modify(|_, w| w.fmcen().set_bit());
+        }
+
+        if GPIOC::is_enabled() {
+            info!("====> GPIOC时钟已使能")
+        } else {
+            info!("====> 使能GPIOC时钟");
+            GPIOC::enable(rcc);
+            // rcc.ahb1enr().modify(|_, w| w.gpiocen().set_bit());
+        }
+
+        if GPIOD::is_enabled() {
+            info!("====> GPIOD时钟已使能")
+        } else {
+            info!("====> 使能GPIOD时钟");
+            GPIOD::enable(rcc);
+            // rcc.ahb1enr().modify(|_, w| w.gpioden().set_bit());
+        }
+
+        if GPIOE::is_enabled() {
+            info!("====> GPIOE时钟已使能")
+        } else {
+            info!("====> 使能GPIOE时钟");
+            GPIOE::enable(rcc);
+            // rcc.ahb1enr().modify(|_, w| w.gpioeen().set_bit());
+        }
+
+        if GPIOF::is_enabled() {
+            info!("====> GPIOF时钟已使能")
+        } else {
+            info!("====> 使能GPIOF时钟");
+            GPIOF::enable(rcc);
+            // rcc.ahb1enr().modify(|_, w| w.gpiofen().set_bit());
+        }
+
+        if GPIOG::is_enabled() {
+            info!("====> GPIOG时钟已使能")
+        } else {
+            info!("====> 使能GPIOG时钟");
+            GPIOG::enable(rcc);
+            // rcc.ahb1enr().modify(|_, w| w.gpiogen().set_bit());
+        }
 
         // 确保FMC初始化前SDRAM处于复位状态
         self.fmc.sdcr1().reset();
         self.fmc.sdcr2().reset();
         cortex_m::asm::delay(100);
 
-        // 3. 控制寄存器配置 (同时配置SDCR1和SDCR2)
-        let mut sdctrlreg: u32 = 0;
-        sdctrlreg &= !(0b11 << 7); // 清除原CAS设置
-        sdctrlreg |= 1 << 0; // 9位列地址
-        sdctrlreg |= 2 << 2; // 13位行地址
-        sdctrlreg |= 1 << 4; // 16位数据位宽
-        sdctrlreg |= 1 << 6; // 4个内部存储区
-        sdctrlreg |= 0b01 << 7; // 2个CAS延迟 (正确值应为0b10)
-        sdctrlreg |= 0 << 9; // 允许写访问
-        sdctrlreg |= 2 << 10; // SDRAM时钟=HCLK/2 (正确值应为0b10)
-        sdctrlreg |= 1 << 12; // 使能突发访问
-        sdctrlreg |= 0 << 13; // 读通道延迟0个HCLK
+        // 1. 控制寄存器配置
 
-        // 多次写入确保配置生效
-        for _ in 0..3 {
-            self.fmc.sdcr1().write(|w| unsafe { w.bits(sdctrlreg) });
-            self.fmc.sdcr2().write(|w| unsafe { w.bits(sdctrlreg) });
-            cortex_m::asm::delay(100);
-        }
+        let mut sdctrlreg: u32 = 0;
+        sdctrlreg |= 0 << 0; // 8位列地址 ✅
+        sdctrlreg |= 2 << 2; // 13位行地址 ✅
+        sdctrlreg |= 1 << 4; // 16位数据宽度 ✅
+        sdctrlreg |= 1 << 6; // 4个内部Bank ✅
+        sdctrlreg |= 0b10 << 7; // CAS=3 cycles ✅
+        sdctrlreg |= 0 << 9; // 允许写 ✅
+        sdctrlreg |= 0b10 << 10; // SDCLK = HCLK/2 ✅
+        sdctrlreg |= 1 << 12; // 突发读取 ✅
+        sdctrlreg |= 0 << 13; // 读管道延迟0 ✅
+        self.fmc.sdcr1().write(|w| unsafe { w.bits(sdctrlreg) });
 
         info!("控制寄存器配置完成: 0x{:08X}", sdctrlreg);
 
@@ -250,13 +277,14 @@ impl SdramDriver {
         self.wait_busy(100);
         info!("步骤3: 自动刷新完成");
 
-        // 4. 加载模式寄存器
+        // 2. 模式寄存器
+
         let mut mregval: u16 = 0;
-        mregval |= 1 << 0; // 突发长度:1
-        mregval |= 0 << 3; // 突发类型:连续
-        mregval |= 2 << 4; // CAS值:2
-        mregval |= 0 << 7; // 操作模式:标准模式
-        mregval |= 1 << 9; // 突发写模式:单点访问
+        mregval |= 0b011 << 0; // Burst Length = 8 ✅
+        mregval |= 0 << 3; // Burst Type = Sequential ✅
+        mregval |= 2 << 4; // CAS Latency = 3 ✅
+        mregval |= 0 << 7; // Operating Mode = Standard ✅
+        mregval |= 1 << 9; // Write Burst Mode = Single ✅
 
         self.send_cmd(0, 4, 0, mregval)?;
         self.wait_busy(100);
