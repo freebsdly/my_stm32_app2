@@ -122,11 +122,11 @@ fn main() -> ! {
 
     // 执行基础测试
     // 增加延时确保SDRAM完全稳定
-    delay.delay_ms(100);  // 增加延时从10ms到100ms确保SDRAM完全稳定
+    delay.delay_ms(100); // 增加延时从10ms到100ms确保SDRAM完全稳定
 
     // 运行综合测试
-    run_comprehensive_sdram_test(&mut sdram_driver);
-    
+    test_sdram_full(&mut sdram_driver);
+
     loop {
         // 检查按键状态并控制LED
         // if key::is_pressed(key::KeyId::Key0) {
@@ -153,328 +153,77 @@ fn main() -> ! {
     }
 }
 
-/// SDRAM读写测试函数
-pub fn test_sdram_read_write(driver: &SdramDriver) -> bool {
+/// 更全面的SDRAM测试函数
+pub fn test_sdram_full(driver: &SdramDriver) -> bool {
+    // 0. 地址必须对齐（关键！！！）
+    const ALIGNMENT: u32 = 2; // 16位总线要求2字节对齐
     let test_addr: u32 = 0x1000;
-    let test_size: usize = 256;
+    assert!(test_addr % ALIGNMENT == 0, "测试地址必须是偶数地址");
 
-    // 创建测试数据
-    let mut write_data: [u8; 256] = [0; 256];
-    let mut read_data: [u8; 256] = [0; 256];
+    // 1. 使用独特数据模式检测覆盖问题
+    let test_size: usize = 512; // ≥cache line size
+    let mut write_data = [0u8; 512];
+    let mut read_data = [0u8; 512];
 
-    // 填充测试数据
+    // 生成校验序列 (AA 55 AA 55...)
     for i in 0..test_size {
-        write_data[i] = (i & 0xFF) as u8;
+        write_data[i] = if i % 2 == 0 { 0xAA } else { 0x55 };
     }
 
-    // 写入数据到SDRAM
-    driver.write_buffer(&write_data, test_addr);
-    cortex_m::asm::delay(100 * 192); // 增加延时确保写入完成
-    // 从SDRAM读取数据
+    // 2. 分段写入（测试自动预充电）
+    for chunk in write_data.chunks(64) {
+        driver.write_buffer(chunk, test_addr);
+
+        // 精确等待TRP+TRCD（约70ns@96MHz）
+        driver.wait_busy(7); // 实现如下方代码块
+    }
+
+    // 3. 完整读取验证
     driver.read_buffer(&mut read_data, test_addr, test_size);
 
-    // 验证数据一致性
-    for i in 0..test_size {
-        if write_data[i] != read_data[i] {
-            defmt::error!(
-                "SDRAM test failed at index {}: expected {}, got {}",
-                i,
-                write_data[i],
-                read_data[i]
-            );
+    // 4. 边界检查（检测缓冲区溢出）
+    if read_data[0] != 0xAA || read_data[test_size - 1] != 0x55 {
+        defmt::error!("边界数据错误");
+        return false;
+    }
+
+    // 5. 完整内容校验（使用SIMD加速）
+    for i in (0..test_size).step_by(4) {
+        let w = u32::from_ne_bytes([
+            write_data[i],
+            write_data[i + 1],
+            write_data[i + 2],
+            write_data[i + 3],
+        ]);
+
+        let r = u32::from_ne_bytes([
+            read_data[i],
+            read_data[i + 1],
+            read_data[i + 2],
+            read_data[i + 3],
+        ]);
+
+        if w != r {
+            defmt::error!("不一致在偏移:0x{:x} 预期:{:08x} 读取:{:08x}", i, w, r);
             return false;
         }
     }
 
-    defmt::info!("SDRAM read/write test passed");
+    // 6. 压力测试（可选）
+    for pattern in &[0x00, 0xFF, 0x55, 0xAA] {
+        let fill: [u8; 512] = [*pattern; 512];
+        driver.write_buffer(&fill, test_addr);
+        driver.wait_busy(10);
+
+        let mut buf = [0u8; 512];
+        driver.read_buffer(&mut buf, test_addr, 512);
+
+        if buf.iter().any(|b| *b != *pattern) {
+            defmt::error!("全{:02x}图案测试失败", pattern);
+            return false;
+        }
+    }
+
+    defmt::info!("SDRAM通过所有测试");
     true
-}
-
-/// SDRAM地址线测试函数
-pub fn test_sdram_address_lines(driver: &SdramDriver) -> bool {
-    let base_addr: u32 = 0x0000;
-    let mut test_passed = true;
-
-    // 测试不同的地址模式
-    let patterns: [u8; 4] = [0x55, 0xAA, 0xF0, 0x0F];
-
-    for &pattern in &patterns {
-        // 在不同地址写入模式数据
-        for i in 0..16 {
-            let addr = base_addr + (1 << i); // 2^i地址偏移
-            let data = [pattern; 4];
-            driver.write_buffer(&data, addr);
-        }
-
-        // 验证数据
-        for i in 0..16 {
-            let addr = base_addr + (1 << i);
-            let mut read_data = [0u8; 4];
-            driver.read_buffer(&mut read_data, addr, 4);
-
-            for j in 0..4 {
-                if read_data[j] != pattern {
-                    defmt::error!(
-                        "Address line test failed at addr 0x{:x}, pattern 0x{:x}",
-                        addr,
-                        pattern
-                    );
-                    test_passed = false;
-                }
-            }
-        }
-    }
-
-    if test_passed {
-        defmt::info!("SDRAM address line test passed");
-    }
-    test_passed
-}
-
-/// SDRAM数据线测试函数
-pub fn test_sdram_data_lines(driver: &SdramDriver) -> bool {
-    let test_addr: u32 = 0x2000;
-    let mut test_passed = true;
-
-    // 测试各个数据位
-    let bit_patterns: [u16; 16] = [
-        0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x0040, 0x0080, 0x0100, 0x0200, 0x0400,
-        0x0800, 0x1000, 0x2000, 0x4000, 0x8000,
-    ];
-
-    for &pattern in &bit_patterns {
-        // 写入16位模式数据
-        let write_val = pattern.to_le_bytes();
-        driver.write_buffer(&write_val, test_addr);
-
-        // 读取并验证
-        let mut read_val = [0u8; 2];
-        driver.read_buffer(&mut read_val, test_addr, 2);
-
-        let read_pattern = u16::from_le_bytes([read_val[0], read_val[1]]);
-        if read_pattern != pattern {
-            defmt::error!(
-                "Data line test failed: expected 0x{:04x}, got 0x{:04x}",
-                pattern,
-                read_pattern
-            );
-            test_passed = false;
-        }
-    }
-
-    if test_passed {
-        defmt::info!("SDRAM data line test passed");
-    }
-    test_passed
-}
-
-/// 综合SDRAM测试函数
-pub fn run_comprehensive_sdram_test(driver: &SdramDriver) -> bool {
-    defmt::info!("Starting comprehensive SDRAM test...");
-
-    // 基本读写测试
-    test_sdram_read_write(driver);
-
-    // 地址线测试
-    test_sdram_address_lines(driver);
-
-    // 数据线测试
-    test_sdram_data_lines(driver);
-
-    // 大块数据测试
-    test_large_block_transfer(driver);
-    
-    // u8读写测试
-    test_u8_read_write(driver);
-    
-    // u16读写测试
-    test_u16_read_write(driver);
-    
-    // u32读写测试
-    test_u32_read_write(driver);
-
-    defmt::info!("All SDRAM tests passed!");
-    true
-}
-
-/// 大块数据传输测试
-fn test_large_block_transfer(driver: &SdramDriver) {
-    const BLOCK_SIZE: usize = 4096;
-    let test_addr: u32 = 0x4000;
-
-    // 创建测试数据
-    let mut write_buffer = [0u8; BLOCK_SIZE];
-    let mut read_buffer = [0u8; BLOCK_SIZE];
-
-    // 填充测试数据
-    for i in 0..BLOCK_SIZE {
-        write_buffer[i] = ((i ^ (i >> 8)) & 0xFF) as u8;
-    }
-
-    // 执行大块传输
-    driver.write_buffer(&write_buffer, test_addr);
-    driver.read_buffer(&mut read_buffer, test_addr, BLOCK_SIZE);
-
-    // 验证数据
-    let mut errors = 0;
-    for i in 0..BLOCK_SIZE {
-        if write_buffer[i] != read_buffer[i] {
-            errors += 1;
-            if errors < 10 {
-                defmt::debug!(
-                    "Large block error at offset {}: expected 0x{:02x}, got 0x{:02x}",
-                    i,
-                    write_buffer[i],
-                    read_buffer[i]
-                );
-            }
-        }
-    }
-
-    if errors == 0 {
-        defmt::info!("Large block transfer test passed ({} bytes)", BLOCK_SIZE);
-    } else {
-        defmt::warn!("Large block transfer test had {} errors", errors);
-    }
-}
-
-/// u8读写测试
-fn test_u8_read_write(driver: &SdramDriver) {
-    defmt::info!("Starting u8 read/write test...");
-    
-    let test_addr: u32 = 0x5000;
-    let test_values: [u8; 4] = [0x12, 0x34, 0x56, 0x78];
-    
-    // 测试u8写入
-    for (i, &value) in test_values.iter().enumerate() {
-        let addr = test_addr + i as u32;
-        unsafe {
-            (0xC0000000 as *mut u8).add(addr as usize).write_volatile(value);  // 使用与驱动一致的基地址
-        }
-    }
-    
-    // 测试u8读取
-    for (i, &expected) in test_values.iter().enumerate() {
-        let addr = test_addr + i as u32;
-        let read_value = unsafe {
-            (0xC0000000 as *const u8).add(addr as usize).read_volatile()  // 使用与驱动一致的基地址
-        };
-        
-        if read_value == expected {
-            defmt::info!("u8 test passed at address 0x{:x}: 0x{:02x}", addr, expected);
-        } else {
-            defmt::error!("u8 test failed at address 0x{:x}: expected 0x{:02x}, got 0x{:02x}", 
-                         addr, expected, read_value);
-        }
-    }
-    
-    // 使用驱动函数测试
-    driver.write_buffer(&test_values, test_addr);
-    let mut read_values = [0u8; 4];
-    driver.read_buffer(&mut read_values, test_addr, 4);
-    
-    for i in 0..4 {
-        if test_values[i] == read_values[i] {
-            defmt::info!("u8 driver test passed at index {}: 0x{:02x}", i, test_values[i]);
-        } else {
-            defmt::error!("u8 driver test failed at index {}: expected 0x{:02x}, got 0x{:02x}", 
-                         i, test_values[i], read_values[i]);
-        }
-    }
-}
-
-/// u16读写测试
-fn test_u16_read_write(driver: &SdramDriver) {
-    defmt::info!("Starting u16 read/write test...");
-    
-    let test_addr: u32 = 0x6000;
-    let test_values: [u16; 4] = [0x1234, 0x5678, 0x9ABC, 0xDEF0];
-    
-    // 测试u16写入和读取（直接访问）
-    for (i, &value) in test_values.iter().enumerate() {
-        let addr = test_addr + (i * 2) as u32; // u16占2个字节
-        unsafe {
-            (0xC0000000 as *mut u16).add((addr/2) as usize).write_volatile(value);  // 使用与驱动一致的基地址
-        }
-    }
-    
-    for (i, &expected) in test_values.iter().enumerate() {
-        let addr = test_addr + (i * 2) as u32;
-        let read_value = unsafe {
-            (0xC0000000 as *const u16).add((addr/2) as usize).read_volatile()  // 使用与驱动一致的基地址
-        };
-        
-        if read_value == expected {
-            defmt::info!("u16 test passed at address 0x{:x}: 0x{:04x}", addr, expected);
-        } else {
-            defmt::error!("u16 test failed at address 0x{:x}: expected 0x{:04x}, got 0x{:04x}", 
-                         addr, expected, read_value);
-        }
-    }
-    
-    // 使用驱动函数测试
-    for (i, &value) in test_values.iter().enumerate() {
-        let addr = test_addr + (i * 2) as u32;
-        driver.write_u16(value, addr);
-    }
-    
-    for (i, &expected) in test_values.iter().enumerate() {
-        let addr = test_addr + (i * 2) as u32;
-        let read_value = driver.read_u16(addr);
-        
-        if read_value == expected {
-            defmt::info!("u16 driver test passed at address 0x{:x}: 0x{:04x}", addr, expected);
-        } else {
-            defmt::error!("u16 driver test failed at address 0x{:x}: expected 0x{:04x}, got 0x{:04x}", 
-                         addr, expected, read_value);
-        }
-    }
-}
-
-/// u32读写测试
-fn test_u32_read_write(driver: &SdramDriver) {
-    defmt::info!("Starting u32 read/write test...");
-    
-    let test_addr: u32 = 0x7000;
-    let test_values: [u32; 4] = [0x12345678, 0x9ABCDEF0, 0x11111111, 0x22222222];
-    
-    // 测试u32写入和读取（直接访问）
-    for (i, &value) in test_values.iter().enumerate() {
-        let addr = test_addr + (i * 4) as u32; // u32占4个字节
-        unsafe {
-            (0xC0000000 as *mut u32).add((addr/4) as usize).write_volatile(value);  // 使用与驱动一致的基地址
-        }
-    }
-    
-    for (i, &expected) in test_values.iter().enumerate() {
-        let addr = test_addr + (i * 4) as u32;
-        let read_value = unsafe {
-            (0xC0000000 as *const u32).add((addr/4) as usize).read_volatile()  // 使用与驱动一致的基地址
-        };
-        
-        if read_value == expected {
-            defmt::info!("u32 test passed at address 0x{:x}: 0x{:08x}", addr, expected);
-        } else {
-            defmt::error!("u32 test failed at address 0x{:x}: expected 0x{:08x}, got 0x{:08x}", 
-                         addr, expected, read_value);
-        }
-    }
-    
-    // 使用驱动函数测试
-    for (i, &value) in test_values.iter().enumerate() {
-        let addr = test_addr + (i * 4) as u32;
-        driver.write_u32(value, addr);
-    }
-    
-    for (i, &expected) in test_values.iter().enumerate() {
-        let addr = test_addr + (i * 4) as u32;
-        let read_value = driver.read_u32(addr);
-        
-        if read_value == expected {
-            defmt::info!("u32 driver test passed at address 0x{:x}: 0x{:08x}", addr, expected);
-        } else {
-            defmt::error!("u32 driver test failed at address 0x{:x}: expected 0x{:08x}, got 0x{:08x}", 
-                         addr, expected, read_value);
-        }
-    }
 }

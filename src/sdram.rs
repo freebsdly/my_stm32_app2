@@ -1,6 +1,9 @@
 use defmt::info;
 use stm32f4xx_hal::{pac, rcc::Rcc};
 
+const SDRAM_BASE_ADDR: u32 = 0xC000_0000;
+const SDRAM_SIZE: u32 = 32 * 1024 * 1024;
+
 pub struct SdramDriver {
     fmc: pac::FMC,
 }
@@ -235,16 +238,16 @@ impl SdramDriver {
         info!("步骤1: 时钟配置使能完成");
 
         // 延迟至少500us
-        cortex_m::asm::delay(500 * 180); // 192MHz系统时钟
+        self.wait_busy(500);
 
         // 步骤2: 预充电所有存储区
         self.send_cmd(0, 2, 0, 0)?;
-        cortex_m::asm::delay(100 * 180); // 100us延迟
+        self.wait_busy(100);
         info!("步骤2: 预充电完成");
 
         // 步骤3: 自动刷新（执行8次）
         self.send_cmd(0, 3, 8, 0)?;
-        cortex_m::asm::delay(100 * 180); // 增加延时
+        self.wait_busy(100);
         info!("步骤3: 自动刷新完成");
 
         // 4. 加载模式寄存器
@@ -256,7 +259,7 @@ impl SdramDriver {
         mregval |= 1 << 9; // 突发写模式:单点访问
 
         self.send_cmd(0, 4, 0, mregval)?;
-        cortex_m::asm::delay(100 * 180); // 100us延迟
+        self.wait_busy(100);
         info!("步骤4: 模式寄存器加载完成");
 
         // 5. 设置刷新定时器
@@ -271,88 +274,77 @@ impl SdramDriver {
         info!("刷新定时器设置: {}", refresh_rate);
 
         // 6. 最后再等待一段时间让SDRAM稳定
-        cortex_m::asm::delay(1000 * 180); // 1ms延迟
+        self.wait_busy(1000);
 
         info!("SDRAM初始化完成");
         Ok(())
     }
 
-    pub fn write_buffer(&self, data: &[u8], addr: u32) {
-        let base = 0xC000_0000;
-        let phy_addr = base + addr;
-
-        // 统一使用8位写入以匹配read_buffer
-        for (i, &byte) in data.iter().enumerate() {
-            unsafe {
-                let target_addr = (phy_addr + i as u32) as *mut u8;
-                target_addr.write_volatile(byte);
-                // 移除调试日志以减少干扰
-            }
-        }
-        // 在 write_buffer 和 read_buffer 中添加地址和数据验证
-        // info!("Writing {} bytes to address 0x{:x}", data.len(), addr);
-    }
-
-    pub fn read_buffer(&self, pbuf: &mut [u8], addr: u32, n: usize) {
-        let base_addr = 0xC000_0000; // 与写入方法使用相同的基地址
-        let start_addr = base_addr + addr; // 确保正确计算起始地址
-
-        for i in 0..n {
-            unsafe {
-                let source_addr = (start_addr + i as u32) as *const u8;
-                pbuf[i] = source_addr.read_volatile();
-            }
-        }
-        // info!("Reading {} bytes from address 0x{:x}", n, addr);
-    }
-
-    /// 写入u16数据到SDRAM
-    pub fn write_u16(&self, data: u16, addr: u32) {
-        let base = 0xC000_0000;
-        let phy_addr = base + addr;
-
+    /// 优化后的读取函数 - 支持多种数据宽度
+    pub fn read<T: Copy + Sized>(&self, addr: u32) -> T {
         unsafe {
-            let target_addr = (phy_addr) as *mut u16;
-            target_addr.write_volatile(data);
+            let ptr = (SDRAM_BASE_ADDR + addr) as *const T;
+            ptr.read_volatile()
         }
-        // info!("Writing u16 0x{:04x} to address 0x{:x}", data, addr);
     }
 
-    /// 从SDRAM读取u16数据
-    pub fn read_u16(&self, addr: u32) -> u16 {
-        let base = 0xC000_0000;
-        let phy_addr = base + addr;
-
-        let value = unsafe {
-            let source_addr = (phy_addr) as *const u16;
-            source_addr.read_volatile()
-        };
-        // info!("Reading u16 0x{:04x} from address 0x{:x}", value, addr);
-        value
-    }
-
-    /// 写入u32数据到SDRAM
-    pub fn write_u32(&self, data: u32, addr: u32) {
-        let base = 0xC000_0000;
-        let phy_addr = base + addr;
-
+    /// 批量读取函数 - 大幅提升效率
+    pub fn read_slice<T: Copy + Sized>(&self, addr: u32, data: &mut [T]) {
         unsafe {
-            let target_addr = (phy_addr) as *mut u32;
-            target_addr.write_volatile(data);
+            let src_ptr = (SDRAM_BASE_ADDR + addr) as *const T;
+            let src_slice = core::slice::from_raw_parts(src_ptr, data.len());
+            data.copy_from_slice(src_slice);
         }
-        // info!("Writing u32 0x{:08x} to address 0x{:x}", data, addr);
     }
 
-    /// 从SDRAM读取u32数据
-    pub fn read_u32(&self, addr: u32) -> u32 {
-        let base = 0xC000_0000;
-        let phy_addr = base + addr;
+    /// 专门优化的字节缓冲区读取
+    pub fn read_buffer(&self, buffer: &mut [u8], addr: u32, n: usize) {
+        // 使用批量读取提升效率
+        self.read_slice::<u16>(addr, &mut unsafe {
+            core::slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u16, n / 2)
+        });
 
-        let value = unsafe {
-            let source_addr = (phy_addr) as *const u32;
-            source_addr.read_volatile()
-        };
-        // info!("Reading u32 0x{:08x} from address 0x{:x}", value, addr);
-        value
+        // 处理奇数长度情况
+        if n % 2 == 1 {
+            buffer[n - 1] = self.read::<u8>(addr + n as u32 - 1);
+        }
+    }
+
+    pub fn write<T: Copy + Sized>(&self, addr: u32, value: T) {
+        unsafe {
+            let ptr = (SDRAM_BASE_ADDR + addr) as *mut T;
+            ptr.write_volatile(value);
+        }
+    }
+
+    pub fn write_slice<T: Copy + Sized>(&self, addr: u32, data: &[T]) {
+        unsafe {
+            let dst_ptr = (SDRAM_BASE_ADDR + addr) as *mut T;
+            let dst_slice = core::slice::from_raw_parts_mut(dst_ptr, data.len());
+            dst_slice.copy_from_slice(data);
+        }
+    }
+
+    pub fn write_buffer(&self, buffer: &[u8], addr: u32) {
+        // 批量写入主要数据
+        self.write_slice::<u16>(addr, &unsafe {
+            core::slice::from_raw_parts(buffer.as_ptr() as *const u16, buffer.len() / 2)
+        });
+
+        // 处理剩余字节
+        if buffer.len() % 2 == 1 {
+            let last_byte = buffer[buffer.len() - 1];
+            self.write::<u8>(addr + buffer.len() as u32 - 1, last_byte);
+        }
+    }
+
+    fn is_valid_address(&self, addr: u32, size: usize) -> bool {
+        // 检查地址范围是否在SDRAM容量内 (32MB)
+        (addr + size as u32) <= SDRAM_SIZE
+    }
+
+    pub fn wait_busy(&self, clocks: u32) {
+        let ticks = clocks * (180_000_000 / 1_000_000); // 180MHz系统时钟
+        cortex_m::asm::delay(ticks);
     }
 }
