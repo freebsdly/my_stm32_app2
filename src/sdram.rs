@@ -32,7 +32,13 @@ impl SdramDriver {
             "  内部Bank数: {}",
             if (sdcr >> 6) & 0b1 == 0 { 2 } else { 4 }
         );
-        info!("  CAS延迟: {}", ((sdcr >> 7) & 0b11) + 1); // 直接加1显示实际延迟
+        let cas_value = (sdcr >> 7) & 0b11;
+        let actual_cas = match cas_value {
+            1 => 2, // 01 -> 2周期
+            2 => 3, // 10 -> 3周期
+            _ => 0, // 非法
+        };
+        info!("CAS延迟: {}周期", actual_cas);
         info!(
             "  写保护: {}",
             if (sdcr >> 9) & 0b1 == 0 {
@@ -44,9 +50,9 @@ impl SdramDriver {
         info!(
             "  SDClock周期: {}",
             match (sdcr >> 10) & 0b11 {
-                0 => "Disable",
-                1 => "HCLK/2",
-                2 => "HCLK/3",
+                0b00 => "Disabled",
+                0b10 => "HCLK/2", // 二进制10对应十进制2
+                0b11 => "HCLK/3", // 二进制11对应十进制3
                 _ => "Reserved",
             }
         );
@@ -185,11 +191,12 @@ impl SdramDriver {
 
         // 3. 控制寄存器配置 (同时配置SDCR1和SDCR2)
         let mut sdctrlreg: u32 = 0;
+        sdctrlreg &= !(0b11 << 7); // 清除原CAS设置
         sdctrlreg |= 1 << 0; // 9位列地址
         sdctrlreg |= 2 << 2; // 13位行地址
         sdctrlreg |= 1 << 4; // 16位数据位宽
         sdctrlreg |= 1 << 6; // 4个内部存储区
-        sdctrlreg |= 2 << 7; // 2个CAS延迟 (正确值应为0b10)
+        sdctrlreg |= 0b01 << 7; // 2个CAS延迟 (正确值应为0b10)
         sdctrlreg |= 0 << 9; // 允许写访问
         sdctrlreg |= 2 << 10; // SDRAM时钟=HCLK/2 (正确值应为0b10)
         sdctrlreg |= 1 << 12; // 使能突发访问
@@ -213,14 +220,10 @@ impl SdramDriver {
         sdtimereg |= 1 << 16; // 恢复延迟=2周期
         sdtimereg |= 1 << 20; // 行预充电延迟=2周期
         sdtimereg |= 1 << 24; // 行到列延迟=2周期
-        sdtimereg |= 1 << 24; // TRCD=2周期 ✓ (1+1=2)
 
-        // 多次写入确保配置生效
-        for _ in 0..3 {
-            self.fmc.sdtr1().write(|w| unsafe { w.bits(sdtimereg) });
-            self.fmc.sdtr2().write(|w| unsafe { w.bits(sdtimereg) });
-            cortex_m::asm::delay(100);
-        }
+        self.fmc.sdtr1().write(|w| unsafe { w.bits(sdtimereg) });
+        // self.fmc.sdtr2().write(|w| unsafe { w.bits(sdtimereg) });
+        cortex_m::asm::delay(100);
 
         info!("时序寄存器配置完成: 0x{:08X}", sdtimereg);
 
@@ -287,7 +290,7 @@ impl SdramDriver {
             }
         }
         // 在 write_buffer 和 read_buffer 中添加地址和数据验证
-        info!("Writing {} bytes to address 0x{:x}", data.len(), addr);
+        // info!("Writing {} bytes to address 0x{:x}", data.len(), addr);
     }
 
     pub fn read_buffer(&self, pbuf: &mut [u8], addr: u32, n: usize) {
@@ -300,7 +303,7 @@ impl SdramDriver {
                 pbuf[i] = source_addr.read_volatile();
             }
         }
-        info!("Reading {} bytes from address 0x{:x}", n, addr);
+        // info!("Reading {} bytes from address 0x{:x}", n, addr);
     }
 
     /// 写入u16数据到SDRAM
@@ -312,7 +315,7 @@ impl SdramDriver {
             let target_addr = (phy_addr) as *mut u16;
             target_addr.write_volatile(data);
         }
-        info!("Writing u16 0x{:04x} to address 0x{:x}", data, addr);
+        // info!("Writing u16 0x{:04x} to address 0x{:x}", data, addr);
     }
 
     /// 从SDRAM读取u16数据
@@ -324,7 +327,7 @@ impl SdramDriver {
             let source_addr = (phy_addr) as *const u16;
             source_addr.read_volatile()
         };
-        info!("Reading u16 0x{:04x} from address 0x{:x}", value, addr);
+        // info!("Reading u16 0x{:04x} from address 0x{:x}", value, addr);
         value
     }
 
@@ -337,7 +340,7 @@ impl SdramDriver {
             let target_addr = (phy_addr) as *mut u32;
             target_addr.write_volatile(data);
         }
-        info!("Writing u32 0x{:08x} to address 0x{:x}", data, addr);
+        // info!("Writing u32 0x{:08x} to address 0x{:x}", data, addr);
     }
 
     /// 从SDRAM读取u32数据
@@ -349,7 +352,7 @@ impl SdramDriver {
             let source_addr = (phy_addr) as *const u32;
             source_addr.read_volatile()
         };
-        info!("Reading u32 0x{:08x} from address 0x{:x}", value, addr);
+        // info!("Reading u32 0x{:08x} from address 0x{:x}", value, addr);
         value
     }
 }
