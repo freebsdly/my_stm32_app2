@@ -10,34 +10,121 @@ impl SdramDriver {
         Self { fmc }
     }
 
-    pub fn debug_status(&self) {
-        let sdsr = self.fmc.sdsr().read().bits();
-        info!("SDSR Status: 0x{:08X}", sdsr);
-        info!("  - RE (Refresh Error): {}", (sdsr >> 0) & 1);
-        info!("  - MODES1: {}", (sdsr >> 1) & 0b11);
-        info!("  - MODES2: {}", (sdsr >> 3) & 0b11);
-        info!("  - BUSY: {}", (sdsr >> 5) & 1);
-    }
-
     pub fn debug_config(&self) {
+        // 打印SDCR寄存器配置
         let sdcr = self.fmc.sdcr1().read().bits();
         info!("SDCR 配置: 0x{:08X}", sdcr);
         info!(
             "  地址位数: COL={}bit, ROW={}bit",
-            (sdcr & 0b11) + 8,
-            ((sdcr >> 2) & 0b11) + 11
+            (sdcr & 0b11) + 8,         // 列地址位数应该加8
+            ((sdcr >> 2) & 0b11) + 11  // 行地址位数应该加11
         );
         info!(
-            "  突发类型: {}/{}",
-            if sdcr & (1 << 9) == 0 {
-                "不使能"
+            "  数据宽度: {}bit",
+            match (sdcr >> 4) & 0b11 {
+                0 => 8,
+                1 => 16,
+                2 => 32,
+                _ => 0,
+            }
+        );
+        info!(
+            "  内部Bank数: {}",
+            if (sdcr >> 6) & 0b1 == 0 { 2 } else { 4 }
+        );
+        info!("  CAS延迟: {}", ((sdcr >> 7) & 0b11) + 1); // 直接加1显示实际延迟
+        info!(
+            "  写保护: {}",
+            if (sdcr >> 9) & 0b1 == 0 {
+                "禁用"
             } else {
-                "使能"
-            },
-            if sdcr & (1 << 12) == 0 {
-                "非管线"
+                "启用"
+            }
+        );
+        info!(
+            "  SDClock周期: {}",
+            match (sdcr >> 10) & 0b11 {
+                0 => "Disable",
+                1 => "HCLK/2",
+                2 => "HCLK/3",
+                _ => "Reserved",
+            }
+        );
+        info!(
+            "  突发读取: {}",
+            if (sdcr >> 12) & 0b1 == 0 {
+                "禁用"
             } else {
-                "管线"
+                "启用"
+            }
+        );
+        info!(
+            "  读管道: {} HCLK",
+            match (sdcr >> 13) & 0b11 {
+                0 => 0,
+                1 => 1,
+                2 => 2,
+                _ => 0,
+            }
+        );
+
+        // 打印SDTR寄存器配置
+        let sdtr = self.fmc.sdtr1().read().bits();
+        info!("SDTR 配置: 0x{:08X}", sdtr);
+        info!("  TMRD (模式寄存器设置时间): {} cycles", (sdtr & 0xF) + 1);
+        info!(
+            "  TXSR (退出自刷新时间): {} cycles",
+            ((sdtr >> 4) & 0xF) + 1
+        );
+        info!("  TRAS (自刷新时间): {} cycles", ((sdtr >> 8) & 0xF) + 1);
+        info!("  TRC (行循环延迟): {} cycles", ((sdtr >> 12) & 0xF) + 1);
+        info!("  TWR (恢复延迟): {} cycles", ((sdtr >> 16) & 0xF) + 1);
+        info!("  TRP (行预充电延迟): {} cycles", ((sdtr >> 20) & 0xF) + 1);
+        info!("  TRCD (行到列延迟): {} cycles", ((sdtr >> 24) & 0xF) + 1);
+
+        // 打印SDRTR寄存器配置
+        let sdrtr = self.fmc.sdrtr().read().bits();
+        info!("SDRTR 配置: 0x{:08X}", sdrtr);
+        info!("  刷新计数器: {}", sdrtr & 0x1FFF);
+        info!(
+            "  清除刷新错误标志: {}",
+            if (sdrtr >> 31) & 0b1 == 1 {
+                "已清除"
+            } else {
+                "未清除"
+            }
+        );
+
+        // 打印SDSR状态
+        let sdsr = self.fmc.sdsr().read().bits();
+        info!("SDSR 状态: 0x{:08X}", sdsr);
+        info!("  刷新错误: {}", if sdsr & 0b1 == 1 { "是" } else { "否" });
+        info!(
+            "  Bank1模式: {}",
+            match (sdsr >> 1) & 0b11 {
+                0 => "正常",
+                1 => "自刷新",
+                2 => "预充电",
+                3 => "加载模式寄存器",
+                _ => "未知",
+            }
+        );
+        info!(
+            "  Bank2模式: {}",
+            match (sdsr >> 3) & 0b11 {
+                0 => "正常",
+                1 => "自刷新",
+                2 => "预充电",
+                3 => "加载模式寄存器",
+                _ => "未知",
+            }
+        );
+        info!(
+            "  忙状态: {}",
+            if (sdsr >> 5) & 0b1 == 1 {
+                "忙"
+            } else {
+                "空闲"
             }
         );
     }
@@ -91,32 +178,50 @@ impl SdramDriver {
         cortex_m::asm::delay(100);
         info!("FMC时钟已使能");
 
-        // 3. 修正控制寄存器（NC应该为1）
-        let mut sdctrlreg: u32 = 0;
-        sdctrlreg |= 0b01 << 0; // 修正：9位列地址 (NC=1)
-        sdctrlreg |= 0b10 << 2; // 13位行地址 (NR=2)
-        sdctrlreg |= 0b01 << 4; // 16位数据位宽 (MWID=1)
-        sdctrlreg |= 1 << 6; // 4个内部存储区 (NB=1)
-        sdctrlreg |= 0b10 << 7; // CAS延迟=2 (CAS=2)
-        sdctrlreg |= 0 << 9; // 写保护禁用 (WP=0)
-        sdctrlreg |= 0b10 << 10; // SDCLK = HCLK/2 (SDCLK=2)
-        sdctrlreg |= 1 << 12; // 使能突发读 (RBURST=1)
-        sdctrlreg |= 0 << 13; // 读通道延迟=0 (RPIPE=0)
+        // 确保FMC初始化前SDRAM处于复位状态
+        self.fmc.sdcr1().reset();
+        self.fmc.sdcr2().reset();
+        cortex_m::asm::delay(100);
 
-        self.fmc.sdcr1().write(|w| unsafe { w.bits(sdctrlreg) });
+        // 3. 控制寄存器配置 (同时配置SDCR1和SDCR2)
+        let mut sdctrlreg: u32 = 0;
+        sdctrlreg |= 1 << 0; // 9位列地址
+        sdctrlreg |= 2 << 2; // 13位行地址
+        sdctrlreg |= 1 << 4; // 16位数据位宽
+        sdctrlreg |= 1 << 6; // 4个内部存储区
+        sdctrlreg |= 2 << 7; // 2个CAS延迟 (正确值应为0b10)
+        sdctrlreg |= 0 << 9; // 允许写访问
+        sdctrlreg |= 2 << 10; // SDRAM时钟=HCLK/2 (正确值应为0b10)
+        sdctrlreg |= 1 << 12; // 使能突发访问
+        sdctrlreg |= 0 << 13; // 读通道延迟0个HCLK
+
+        // 多次写入确保配置生效
+        for _ in 0..3 {
+            self.fmc.sdcr1().write(|w| unsafe { w.bits(sdctrlreg) });
+            self.fmc.sdcr2().write(|w| unsafe { w.bits(sdctrlreg) });
+            cortex_m::asm::delay(100);
+        }
+
         info!("控制寄存器配置完成: 0x{:08X}", sdctrlreg);
 
-        // 2. 配置时序寄存器（关键修正）
+        // 2. 时序寄存器配置
         let mut sdtimereg: u32 = 0;
-        sdtimereg |= 2 << 0; // TMRD=2周期
-        sdtimereg |= 7 << 4; // TXSR=7周期
-        sdtimereg |= 6 << 8; // TRAS=6周期
-        sdtimereg |= 6 << 12; // TRC=6周期
-        sdtimereg |= 2 << 16; // TWR=2周期
-        sdtimereg |= 2 << 20; // TRP=2周期
-        sdtimereg |= 2 << 24; // TRCD=2周期
+        sdtimereg |= 1 << 0; // 加载模式寄存器到激活时间延迟=2周期
+        sdtimereg |= 6 << 4; // 退出自刷新延迟=7周期
+        sdtimereg |= 5 << 8; // 自刷新时间=6周期
+        sdtimereg |= 5 << 12; // 行循环延迟=6周期
+        sdtimereg |= 1 << 16; // 恢复延迟=2周期
+        sdtimereg |= 1 << 20; // 行预充电延迟=2周期
+        sdtimereg |= 1 << 24; // 行到列延迟=2周期
+        sdtimereg |= 1 << 24; // TRCD=2周期 ✓ (1+1=2)
 
-        self.fmc.sdtr1().write(|w| unsafe { w.bits(sdtimereg) });
+        // 多次写入确保配置生效
+        for _ in 0..3 {
+            self.fmc.sdtr1().write(|w| unsafe { w.bits(sdtimereg) });
+            self.fmc.sdtr2().write(|w| unsafe { w.bits(sdtimereg) });
+            cortex_m::asm::delay(100);
+        }
+
         info!("时序寄存器配置完成: 0x{:08X}", sdtimereg);
 
         // 3. SDRAM初始化序列
@@ -126,8 +231,8 @@ impl SdramDriver {
         self.send_cmd(0, 1, 0, 0)?;
         info!("步骤1: 时钟配置使能完成");
 
-        // 延迟至少200us（重要！）
-        cortex_m::asm::delay(500 * 180); // 168MHz系统时钟
+        // 延迟至少500us
+        cortex_m::asm::delay(500 * 180); // 192MHz系统时钟
 
         // 步骤2: 预充电所有存储区
         self.send_cmd(0, 2, 0, 0)?;
@@ -139,21 +244,27 @@ impl SdramDriver {
         cortex_m::asm::delay(100 * 180); // 增加延时
         info!("步骤3: 自动刷新完成");
 
-        // 6. 加载模式寄存器
+        // 4. 加载模式寄存器
         let mut mregval: u16 = 0;
-        mregval |= 0 << 0; // 突发长度=1
-        mregval |= 0 << 3; // 突发类型=连续
-        mregval |= 2 << 4; // CAS延迟=2
-        mregval |= 0 << 7; // 操作模式=标准
-        mregval |= 1 << 9; // 写突发模式=单点访问
+        mregval |= 1 << 0; // 突发长度:1
+        mregval |= 0 << 3; // 突发类型:连续
+        mregval |= 2 << 4; // CAS值:2
+        mregval |= 0 << 7; // 操作模式:标准模式
+        mregval |= 1 << 9; // 突发写模式:单点访问
 
         self.send_cmd(0, 4, 0, mregval)?;
         cortex_m::asm::delay(100 * 180); // 100us延迟
         info!("步骤4: 模式寄存器加载完成");
 
-        // 5. 设置刷新定时器（更保守的值）
+        // 5. 设置刷新定时器
         let refresh_rate = 730;
-        self.fmc.sdrtr().write(|w| unsafe { w.bits(refresh_rate) });
+
+        // 多次写入确保配置生效
+        for _ in 0..3 {
+            self.fmc.sdrtr().write(|w| unsafe { w.bits(refresh_rate) });
+            cortex_m::asm::delay(100);
+        }
+
         info!("刷新定时器设置: {}", refresh_rate);
 
         // 6. 最后再等待一段时间让SDRAM稳定
@@ -180,7 +291,7 @@ impl SdramDriver {
     }
 
     pub fn read_buffer(&self, pbuf: &mut [u8], addr: u32, n: usize) {
-        let base_addr = 0xD000_0000;  // 修正基地址
+        let base_addr = 0xC000_0000; // 与写入方法使用相同的基地址
         let start_addr = base_addr + addr; // 确保正确计算起始地址
 
         for i in 0..n {
@@ -196,19 +307,19 @@ impl SdramDriver {
     pub fn write_u16(&self, data: u16, addr: u32) {
         let base = 0xC000_0000;
         let phy_addr = base + addr;
-        
+
         unsafe {
             let target_addr = (phy_addr) as *mut u16;
             target_addr.write_volatile(data);
         }
         info!("Writing u16 0x{:04x} to address 0x{:x}", data, addr);
     }
-    
+
     /// 从SDRAM读取u16数据
     pub fn read_u16(&self, addr: u32) -> u16 {
         let base = 0xC000_0000;
         let phy_addr = base + addr;
-        
+
         let value = unsafe {
             let source_addr = (phy_addr) as *const u16;
             source_addr.read_volatile()
@@ -216,24 +327,24 @@ impl SdramDriver {
         info!("Reading u16 0x{:04x} from address 0x{:x}", value, addr);
         value
     }
-    
+
     /// 写入u32数据到SDRAM
     pub fn write_u32(&self, data: u32, addr: u32) {
         let base = 0xC000_0000;
         let phy_addr = base + addr;
-        
+
         unsafe {
             let target_addr = (phy_addr) as *mut u32;
             target_addr.write_volatile(data);
         }
         info!("Writing u32 0x{:08x} to address 0x{:x}", data, addr);
     }
-    
+
     /// 从SDRAM读取u32数据
     pub fn read_u32(&self, addr: u32) -> u32 {
         let base = 0xC000_0000;
         let phy_addr = base + addr;
-        
+
         let value = unsafe {
             let source_addr = (phy_addr) as *const u32;
             source_addr.read_volatile()

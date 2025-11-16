@@ -33,8 +33,8 @@ fn main() -> ! {
     let clock_cfg = Config::hse(25.MHz())
         .sysclk(180.MHz())
         .hclk(180.MHz()) // AHB总线时钟 = SYSCLK/1
-        .pclk1(45.MHz()) // APB1低速外设时钟 = HCLK/4
-        .pclk2(90.MHz()); // APB2高速外设时钟 = HCLK/2
+        .pclk1(48.MHz()) // APB1低速外设时钟 = HCLK/4
+        .pclk2(96.MHz()); // APB2高速外设时钟 = HCLK/2
 
     // 2. 配置系统时钟（关键：延时精度依赖时钟频率）
     let mut rcc = dp.RCC.constrain().freeze(clock_cfg);
@@ -56,52 +56,52 @@ fn main() -> ! {
     let led1 = gpio_b.pb0.into_push_pull_output();
     led::init(led0, led1);
 
-    // 2. 配置GPIO引脚为FMC功能
+    // 2. 配置GPIO引脚为FMC功能 (AF12)
     // 初始化SDRAM和配置FMC引脚
     let _fmc_pins = (
         // Address pins
-        alt_fmc::A0::from(gpio_f.pf0.into_alternate()),
-        alt_fmc::A1::from(gpio_f.pf1.into_alternate()),
-        alt_fmc::A2::from(gpio_f.pf2.into_alternate()),
-        alt_fmc::A3::from(gpio_f.pf3.into_alternate()),
-        alt_fmc::A4::from(gpio_f.pf4.into_alternate()),
-        alt_fmc::A5::from(gpio_f.pf5.into_alternate()),
-        alt_fmc::A6::from(gpio_f.pf12.into_alternate()),
-        alt_fmc::A7::from(gpio_f.pf13.into_alternate()),
-        alt_fmc::A8::from(gpio_f.pf14.into_alternate()),
-        alt_fmc::A9::from(gpio_f.pf15.into_alternate()),
-        alt_fmc::A10::from(gpio_g.pg0.into_alternate()),
-        alt_fmc::A11::from(gpio_g.pg1.into_alternate()),
-        alt_fmc::A12::from(gpio_g.pg2.into_alternate()),
+        alt_fmc::A0::from(gpio_f.pf0.into_alternate::<12>()),
+        alt_fmc::A1::from(gpio_f.pf1.into_alternate::<12>()),
+        alt_fmc::A2::from(gpio_f.pf2.into_alternate::<12>()),
+        alt_fmc::A3::from(gpio_f.pf3.into_alternate::<12>()),
+        alt_fmc::A4::from(gpio_f.pf4.into_alternate::<12>()),
+        alt_fmc::A5::from(gpio_f.pf5.into_alternate::<12>()),
+        alt_fmc::A6::from(gpio_f.pf12.into_alternate::<12>()),
+        alt_fmc::A7::from(gpio_f.pf13.into_alternate::<12>()),
+        alt_fmc::A8::from(gpio_f.pf14.into_alternate::<12>()),
+        alt_fmc::A9::from(gpio_f.pf15.into_alternate::<12>()),
+        alt_fmc::A10::from(gpio_g.pg0.into_alternate::<12>()),
+        alt_fmc::A11::from(gpio_g.pg1.into_alternate::<12>()),
+        alt_fmc::A12::from(gpio_g.pg2.into_alternate::<12>()),
         // Bank address pins
-        alt_fmc::Ba0::from(gpio_g.pg4.into_alternate()),
-        alt_fmc::Ba1::from(gpio_g.pg5.into_alternate()),
+        alt_fmc::Ba0::from(gpio_g.pg4.into_alternate::<12>()),
+        alt_fmc::Ba1::from(gpio_g.pg5.into_alternate::<12>()),
         // Data pins
-        alt_fmc::D0::from(gpio_d.pd14.into_alternate()),
-        alt_fmc::D1::from(gpio_d.pd15.into_alternate()),
-        alt_fmc::D2::from(gpio_d.pd0.into_alternate()),
-        alt_fmc::D3::from(gpio_d.pd1.into_alternate()),
-        alt_fmc::D4::from(gpio_e.pe7.into_alternate()),
-        alt_fmc::D5::from(gpio_e.pe8.into_alternate()),
-        alt_fmc::D6::from(gpio_e.pe9.into_alternate()),
-        alt_fmc::D7::from(gpio_e.pe10.into_alternate()),
-        alt_fmc::D8::from(gpio_e.pe11.into_alternate()),
-        alt_fmc::D9::from(gpio_e.pe12.into_alternate()),
-        alt_fmc::D10::from(gpio_e.pe13.into_alternate()),
-        alt_fmc::D11::from(gpio_e.pe14.into_alternate()),
-        alt_fmc::D12::from(gpio_e.pe15.into_alternate()),
-        alt_fmc::D13::from(gpio_d.pd8.into_alternate()),
-        alt_fmc::D14::from(gpio_d.pd9.into_alternate()),
-        alt_fmc::D15::from(gpio_d.pd10.into_alternate()),
+        alt_fmc::D0::from(gpio_d.pd14.into_alternate::<12>()),
+        alt_fmc::D1::from(gpio_d.pd15.into_alternate::<12>()),
+        alt_fmc::D2::from(gpio_d.pd0.into_alternate::<12>()),
+        alt_fmc::D3::from(gpio_d.pd1.into_alternate::<12>()),
+        alt_fmc::D4::from(gpio_e.pe7.into_alternate::<12>()),
+        alt_fmc::D5::from(gpio_e.pe8.into_alternate::<12>()),
+        alt_fmc::D6::from(gpio_e.pe9.into_alternate::<12>()),
+        alt_fmc::D7::from(gpio_e.pe10.into_alternate::<12>()),
+        alt_fmc::D8::from(gpio_e.pe11.into_alternate::<12>()),
+        alt_fmc::D9::from(gpio_e.pe12.into_alternate::<12>()),
+        alt_fmc::D10::from(gpio_e.pe13.into_alternate::<12>()),
+        alt_fmc::D11::from(gpio_e.pe14.into_alternate::<12>()),
+        alt_fmc::D12::from(gpio_e.pe15.into_alternate::<12>()),
+        alt_fmc::D13::from(gpio_d.pd8.into_alternate::<12>()),
+        alt_fmc::D14::from(gpio_d.pd9.into_alternate::<12>()),
+        alt_fmc::D15::from(gpio_d.pd10.into_alternate::<12>()),
         // Control pins
-        alt_fmc::Nbl0::from(gpio_e.pe0.into_alternate()),
-        alt_fmc::Nbl1::from(gpio_e.pe1.into_alternate()),
-        alt_fmc::Sdcke0::from(gpio_h.ph2.into_alternate()),
-        alt_fmc::Sdclk::from(gpio_g.pg8.into_alternate()),
-        alt_fmc::Sdncas::from(gpio_g.pg15.into_alternate()),
-        alt_fmc::Sdne0::from(gpio_h.ph3.into_alternate()),
-        alt_fmc::Sdnras::from(gpio_f.pf11.into_alternate()),
-        alt_fmc::Sdnwe::from(gpio_c.pc0.into_alternate()),
+        alt_fmc::Nbl0::from(gpio_e.pe0.into_alternate::<12>()),
+        alt_fmc::Nbl1::from(gpio_e.pe1.into_alternate::<12>()),
+        alt_fmc::Sdcke0::from(gpio_h.ph2.into_alternate::<12>()),
+        alt_fmc::Sdclk::from(gpio_g.pg8.into_alternate::<12>()),
+        alt_fmc::Sdncas::from(gpio_g.pg15.into_alternate::<12>()),
+        alt_fmc::Sdne0::from(gpio_h.ph3.into_alternate::<12>()),
+        alt_fmc::Sdnras::from(gpio_f.pf11.into_alternate::<12>()),
+        alt_fmc::Sdnwe::from(gpio_c.pc0.into_alternate::<12>()),
     );
 
     // 创建SDRAM驱动实例
@@ -109,7 +109,6 @@ fn main() -> ! {
 
     // 显示初始化前状态
     sdram_driver.debug_config();
-    sdram_driver.debug_status();
 
     info!("开始SDRAM初始化");
     // 初始化SDRAM
@@ -120,11 +119,10 @@ fn main() -> ! {
 
     // 显示初始化后状态
     sdram_driver.debug_config();
-    sdram_driver.debug_status();
 
     // 执行基础测试
     // 增加延时确保SDRAM完全稳定
-    delay.delay_ms(10);
+    delay.delay_ms(100);  // 增加延时从10ms到100ms确保SDRAM完全稳定
 
     // 运行综合测试
     run_comprehensive_sdram_test(&mut sdram_driver);
@@ -171,7 +169,7 @@ pub fn test_sdram_read_write(driver: &SdramDriver) -> bool {
 
     // 写入数据到SDRAM
     driver.write_buffer(&write_data, test_addr);
-    cortex_m::asm::delay(100 * 180); // 增加延时确保写入完成
+    cortex_m::asm::delay(100 * 192); // 增加延时确保写入完成
     // 从SDRAM读取数据
     driver.read_buffer(&mut read_data, test_addr, test_size);
 
@@ -351,7 +349,7 @@ fn test_u8_read_write(driver: &SdramDriver) {
     for (i, &value) in test_values.iter().enumerate() {
         let addr = test_addr + i as u32;
         unsafe {
-            (0xD0000000 as *mut u8).add(addr as usize).write_volatile(value);  // 修正基地址
+            (0xC0000000 as *mut u8).add(addr as usize).write_volatile(value);  // 使用与驱动一致的基地址
         }
     }
     
@@ -359,7 +357,7 @@ fn test_u8_read_write(driver: &SdramDriver) {
     for (i, &expected) in test_values.iter().enumerate() {
         let addr = test_addr + i as u32;
         let read_value = unsafe {
-            (0xD0000000 as *const u8).add(addr as usize).read_volatile()  // 修正基地址
+            (0xC0000000 as *const u8).add(addr as usize).read_volatile()  // 使用与驱动一致的基地址
         };
         
         if read_value == expected {
@@ -396,14 +394,14 @@ fn test_u16_read_write(driver: &SdramDriver) {
     for (i, &value) in test_values.iter().enumerate() {
         let addr = test_addr + (i * 2) as u32; // u16占2个字节
         unsafe {
-            (0xD0000000 as *mut u16).add((addr/2) as usize).write_volatile(value);  // 修正基地址
+            (0xC0000000 as *mut u16).add((addr/2) as usize).write_volatile(value);  // 使用与驱动一致的基地址
         }
     }
     
     for (i, &expected) in test_values.iter().enumerate() {
         let addr = test_addr + (i * 2) as u32;
         let read_value = unsafe {
-            (0xD0000000 as *const u16).add((addr/2) as usize).read_volatile()  // 修正基地址
+            (0xC0000000 as *const u16).add((addr/2) as usize).read_volatile()  // 使用与驱动一致的基地址
         };
         
         if read_value == expected {
@@ -444,14 +442,14 @@ fn test_u32_read_write(driver: &SdramDriver) {
     for (i, &value) in test_values.iter().enumerate() {
         let addr = test_addr + (i * 4) as u32; // u32占4个字节
         unsafe {
-            (0xD0000000 as *mut u32).add((addr/4) as usize).write_volatile(value);  // 修正基地址
+            (0xC0000000 as *mut u32).add((addr/4) as usize).write_volatile(value);  // 使用与驱动一致的基地址
         }
     }
     
     for (i, &expected) in test_values.iter().enumerate() {
         let addr = test_addr + (i * 4) as u32;
         let read_value = unsafe {
-            (0xD0000000 as *const u32).add((addr/4) as usize).read_volatile()  // 修正基地址
+            (0xC0000000 as *const u32).add((addr/4) as usize).read_volatile()  // 使用与驱动一致的基地址
         };
         
         if read_value == expected {
