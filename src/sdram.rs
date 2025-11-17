@@ -154,12 +154,8 @@ impl SdramDriver {
         tempreg |= (cmd as u32) << 0; // 设置指令
 
         match bankx {
-            // 0 => tempreg |= 0b1111 << 1, // 所有4个banks (CTB1-4)
-            0 => tempreg |= 0b11 << 3,
-            1 => tempreg |= 1 << 4, // CTB1 (bit 4)
-            2 => tempreg |= 1 << 3, // CTB2 (bit 3)
-            3 => tempreg |= 1 << 2, // CTB3 (bit 2)
-            4 => tempreg |= 1 << 1, // CTB4 (bit 1)
+            0 => tempreg |= 1 << 4, // BANK5 (CTB1)
+            1 => tempreg |= 1 << 3, // BANK6 (CTB2)
             _ => {}
         }
         tempreg |= (refresh as u32) << 5; // 设置自刷新次数
