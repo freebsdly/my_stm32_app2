@@ -152,7 +152,16 @@ impl SdramDriver {
         let mut retry: u32 = 0;
 
         tempreg |= (cmd as u32) << 0; // 设置指令
-        tempreg |= 1 << (4 - bankx);
+
+        match bankx {
+            // 0 => tempreg |= 0b1111 << 1, // 所有4个banks (CTB1-4)
+            0 => tempreg |= 0b11 << 3,
+            1 => tempreg |= 1 << 4, // CTB1 (bit 4)
+            2 => tempreg |= 1 << 3, // CTB2 (bit 3)
+            3 => tempreg |= 1 << 2, // CTB3 (bit 2)
+            4 => tempreg |= 1 << 1, // CTB4 (bit 1)
+            _ => {}
+        }
         tempreg |= (refresh as u32) << 5; // 设置自刷新次数
         tempreg |= (regval as u32) << 9; // 设置模式寄存器的值
 
@@ -222,7 +231,6 @@ impl SdramDriver {
 
         // 确保FMC初始化前SDRAM处于复位状态
         self.fmc.sdcr1().reset();
-        self.fmc.sdcr2().reset();
         cortex_m::asm::delay(100);
 
         // 1. 控制寄存器配置
@@ -260,6 +268,11 @@ impl SdramDriver {
         // 3. SDRAM初始化序列
         info!("开始SDRAM初始化序列...");
 
+        // // 为每个bank分别执行初始化命令
+        // for bank in 1..=2 {
+        //     self.send_cmd(bank, 1, 0, 0)?; // 时钟使能
+        //     self.wait_busy(100);
+        // }
         // 步骤1: 时钟配置使能
         self.send_cmd(0, 1, 0, 0)?;
         info!("步骤1: 时钟配置使能完成");
@@ -294,10 +307,9 @@ impl SdramDriver {
         let refresh_rate = 730;
 
         // 多次写入确保配置生效
-        for _ in 0..3 {
-            self.fmc.sdrtr().write(|w| unsafe { w.bits(refresh_rate) });
-            cortex_m::asm::delay(100);
-        }
+
+        self.fmc.sdrtr().write(|w| unsafe { w.bits(refresh_rate) });
+        cortex_m::asm::delay(100);
 
         info!("刷新定时器设置: {}", refresh_rate);
 
@@ -374,5 +386,12 @@ impl SdramDriver {
     pub fn wait_busy(&self, clocks: u32) {
         let ticks = clocks * (180_000_000 / 1_000_000); // 180MHz系统时钟
         cortex_m::asm::delay(ticks);
+    }
+
+    pub fn create_buffer_at_offset<T>(&self, offset: u32, len: usize) -> &'static mut [T] {
+        unsafe {
+            let ptr = (SDRAM_BASE_ADDR + offset) as *mut T;
+            core::slice::from_raw_parts_mut(ptr, len)
+        }
     }
 }

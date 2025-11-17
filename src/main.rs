@@ -10,9 +10,17 @@ mod sdram;
 use cortex_m_rt::entry;
 use defmt::{error, info, warn};
 use defmt_rtt as _;
+use embedded_graphics::mono_font::ascii::FONT_6X9;
+use embedded_graphics::mono_font::MonoTextStyle;
+use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::prelude::{Point, Primitive, RgbColor, Size};
+use embedded_graphics::primitives::{Circle, PrimitiveStyle, Rectangle, Triangle};
+use embedded_graphics::text::Text;
+use embedded_graphics::Drawable;
 use panic_probe as _;
 
 use crate::sdram::SdramDriver;
+use stm32f4xx_hal::ltdc::{BluePins, GreenPins, Layer, LtdcPins, PixelFormat, RedPins};
 use stm32f4xx_hal::pac::FMC;
 use stm32f4xx_hal::rcc::Enable;
 use stm32f4xx_hal::{
@@ -144,41 +152,138 @@ fn main() -> ! {
     // 增加延时确保SDRAM完全稳定
     delay.delay_ms(100); // 增加延时从10ms到100ms确保SDRAM完全稳定
 
+    // // Setup LTDC pins for RGB LCD - using correct pins for Apollo STM32F429 board
+    // let _ = (
+    //     alt_ltdc::R2::from(gpio_h.ph8),
+    //     alt_ltdc::R3::from(gpio_h.ph9),
+    //     alt_ltdc::R4::from(gpio_h.ph10),
+    //     alt_ltdc::R5::from(gpio_h.ph11),
+    //     alt_ltdc::R6::from(gpio_h.ph12),
+    //     alt_ltdc::R7::from(gpio_g.pg6),
+    //     alt_ltdc::G0::from(gpio_e.pe5),
+    //     alt_ltdc::G1::from(gpio_e.pe6),
+    //     alt_ltdc::G2::from(gpio_h.ph13),
+    //     alt_ltdc::G3::from(gpio_h.ph14),
+    //     alt_ltdc::G4::from(gpio_h.ph15),
+    //     alt_ltdc::G5::from(gpio_i.pi0),
+    //     alt_ltdc::G6::from(gpio_i.pi1),
+    //     alt_ltdc::G7::from(gpio_i.pi2),
+    //     alt_ltdc::B0::from(gpio_e.pe4),
+    //     alt_ltdc::B1::from(gpio_g.pg12),
+    //     alt_ltdc::B2::from(gpio_g.pg10),
+    //     alt_ltdc::B3::from(gpio_g.pg11),
+    //     alt_ltdc::B4::from(gpio_i.pi4),
+    //     alt_ltdc::B5::from(gpio_i.pi5),
+    //     alt_ltdc::B6::from(gpio_i.pi6),
+    //     alt_ltdc::B7::from(gpio_i.pi7),
+    //     alt_ltdc::Vsync::from(gpio_i.pi9),
+    //     alt_ltdc::Hsync::from(gpio_i.pi10),
+    //     alt_ltdc::De::from(gpio_f.pf10),
+    //     alt_ltdc::Clk::from(gpio_g.pg7),
+    // );
+
+    // LCD backlight enable - 使用PC9作为背光控制引脚
+    let mut backlight = gpio_b.pb5.into_push_pull_output();
+    backlight.set_high();
+
     // Setup LTDC pins for RGB LCD - using correct pins for Apollo STM32F429 board
-    let _ = (
-        alt_ltdc::R2::from(gpio_h.ph8),
-        alt_ltdc::R3::from(gpio_h.ph9),
-        alt_ltdc::R4::from(gpio_h.ph10),
-        alt_ltdc::R5::from(gpio_h.ph11),
-        alt_ltdc::R6::from(gpio_h.ph12),
-        alt_ltdc::R7::from(gpio_g.pg6),
-        alt_ltdc::G0::from(gpio_e.pe5),
-        alt_ltdc::G1::from(gpio_e.pe6),
-        alt_ltdc::G2::from(gpio_h.ph13),
-        alt_ltdc::G3::from(gpio_h.ph14),
-        alt_ltdc::G4::from(gpio_h.ph15),
-        alt_ltdc::G5::from(gpio_i.pi0),
-        alt_ltdc::G6::from(gpio_i.pi1),
-        alt_ltdc::G7::from(gpio_i.pi2),
-        alt_ltdc::B0::from(gpio_e.pe4),
-        alt_ltdc::B1::from(gpio_g.pg12),
-        alt_ltdc::B2::from(gpio_g.pg10),
-        alt_ltdc::B3::from(gpio_g.pg11),
-        alt_ltdc::B4::from(gpio_i.pi4),
-        alt_ltdc::B5::from(gpio_i.pi5),
-        alt_ltdc::B6::from(gpio_i.pi6),
-        alt_ltdc::B7::from(gpio_i.pi7),
-        alt_ltdc::Vsync::from(gpio_i.pi9),
-        alt_ltdc::Hsync::from(gpio_i.pi10),
-        alt_ltdc::De::from(gpio_f.pf10),
-        alt_ltdc::Clk::from(gpio_g.pg7),
+    let pins = LtdcPins::new(
+        // Red pins - 根据正点原子阿波罗板子的引脚分配
+        RedPins::new(
+            gpio_h.ph2.into_alternate(),  // R0 - PH2 (KEY1)
+            gpio_h.ph3.into_alternate(),  // R1 - PH3 (KEY0)
+            gpio_h.ph8.into_alternate(),  // R2 - PH8 (DCMI_HREF)
+            gpio_h.ph9.into_alternate(),  // R3 - PH9 (LCD_R3)
+            gpio_h.ph10.into_alternate(), // R4 - PH10 (LCD_R4)
+            gpio_h.ph11.into_alternate(), // R5 - PH11 (LCD_R5)
+            gpio_h.ph12.into_alternate(), // R6 - PH12 (LCD_R6)
+            gpio_g.pg6.into_alternate(),  // R7 - PG6 (LCD_R7)
+        ),
+        // Green pins
+        GreenPins::new(
+            gpio_e.pe5.into_alternate(),  // G0 - PE5 (SAI1_SCKA)
+            gpio_e.pe6.into_alternate(),  // G1 - PE6 (SAI1_SDA)
+            gpio_h.ph13.into_alternate(), // G2 - PH13 (LCD_G2)
+            gpio_h.ph14.into_alternate(), // G3 - PH14 (LCD_G3)
+            gpio_h.ph15.into_alternate(), // G4 - PH15 (LCD_G4)
+            gpio_i.pi0.into_alternate(),  // G5 - PI0 (LCD_G5)
+            gpio_i.pi1.into_alternate(),  // G6 - PI1 (LCD_G6)
+            gpio_i.pi2.into_alternate(),  // G7 - PI2 (LCD_G7)
+        ),
+        // Blue pins
+        BluePins::new(
+            gpio_e.pe4.into_alternate(),  // B0 - PE4 (SAI1_FSA)
+            gpio_g.pg12.into_alternate(), // B1 - PG12 (NRF_CE)
+            gpio_g.pg10.into_alternate(), // B2 - PG10 (NRF_CS)
+            gpio_g.pg11.into_alternate(), // B3 - PG11 (LCD_B3)
+            gpio_i.pi4.into_alternate(),  // B4 - PI4 (LCD_B4)
+            gpio_i.pi5.into_alternate(),  // B5 - PI5 (LCD_B5)
+            gpio_i.pi6.into_alternate(),  // B6 - PI6 (LCD_B6)
+            gpio_i.pi7.into_alternate(),  // B7 - PI7 (LCD_B7)
+        ),
+        // Control pins
+        gpio_i.pi10.into_alternate(), // HSYNC - PI10 (LCD_HSYNC)
+        gpio_i.pi9.into_alternate(),  // VSYNC - PI9 (LCD_VSYNC)
+        gpio_f.pf10.into_alternate(), // DE (Data Enable) - PF10 (LCD_DE)
+        gpio_g.pg7.into_alternate(),  // CLK - PG7 (LCD_CLK)
     );
 
-    test_bank_access(&mut sdram_driver);
+    let frame_buffer =
+        unsafe { core::slice::from_raw_parts_mut((sdram::SDRAM_BASE_ADDR) as *mut u16, 800 * 480) };
+
+    // Create and initialize the LCD
+    let mut display = lcd::LcdDisplay::new(dp.LTDC, dp.DMA2D, pins);
+    display
+        .controller
+        .config_layer(Layer::L1, frame_buffer, PixelFormat::RGB565);
+
+    display.controller.enable_layer(Layer::L1);
+    display.controller.reload();
+
+    info!("LCD初始化完成");
+
+    // Draw a background
+    Rectangle::new(Point::new(0, 0), Size::new(800, 480))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::new(0, 0, 0))) // Black background
+        .draw(&mut display)
+        .unwrap();
+
+    // Draw some example graphics
+    // Red rectangle
+    Rectangle::new(Point::new(50, 50), Size::new(200, 150))
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::new(31, 0, 0)))
+        .draw(&mut display)
+        .unwrap();
+
+    // Green circle
+    Circle::new(Point::new(400, 200), 80)
+        .into_styled(PrimitiveStyle::with_fill(Rgb565::new(0, 63, 0)))
+        .draw(&mut display)
+        .unwrap();
+
+    // Blue triangle
+    Triangle::new(
+        Point::new(600, 100),
+        Point::new(700, 300),
+        Point::new(500, 300),
+    )
+    .into_styled(PrimitiveStyle::with_fill(Rgb565::new(0, 0, 31)))
+    .draw(&mut display)
+    .unwrap();
+
+    // Hello text
+    let text_style = MonoTextStyle::new(&FONT_6X9, Rgb565::WHITE);
+    Text::new("STM32F429 LTDC LCD Demo", Point::new(300, 400), text_style)
+        .draw(&mut display)
+        .unwrap();
+
+    Text::new("Hello Rust!", Point::new(350, 440), text_style)
+        .draw(&mut display)
+        .unwrap();
 
     // 运行综合测试
     // 实际能用的内存大小为16MB，bank0和bank1
-    run_check_board_test(17 * 1024 * 1024usize);
+    // run_check_board_test(17 * 1024 * 1024usize);
 
     loop {
         // 检查按键状态并控制LED
@@ -348,7 +453,7 @@ fn run_check_board_test(size: usize) {
     }
 }
 
-fn test_bank_access(sdram: &SdramDriver) {
+fn test_bank_access() {
     // 每个 bank 8MB（32MB / 4）
     let offsets = [
         0 * 8 * 1024 * 1024, // Bank 0
